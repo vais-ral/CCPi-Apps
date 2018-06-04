@@ -1,0 +1,38 @@
+package:
+  name: ccpi-apps
+  version: {{ environ['CIL_VERSION'] }}
+
+
+build:
+  preserve_egg_dir: False
+  script_env:
+    - CIL_VERSION   
+#  number: 0
+  
+
+
+requirements:
+  build:
+    - python
+    - numpy x.x
+    - setuptools
+    - cython
+    - vtk
+    - vc 14 # [win and py36] 
+    - vc 14 # [win and py35] 
+    - vc 9  # [win and py27]
+    - cmake 
+
+  run:
+    - python
+    - numpy x.x
+    - ccpi-viewer =={{ environ['CIL_VERSION'] }}
+    - ccpi-segmentation =={{ environ['CIL_VERSION'] }}
+    - vc 14 # [win and py36] 
+    - vc 14 # [win and py35] 
+    - vc 9  # [win and py27]
+	
+about:
+  home: http://www.ccpi.ac.uk
+  license:  BSD license
+  summary: 'CCPi Core Imaging Library Quantification Toolbox'
