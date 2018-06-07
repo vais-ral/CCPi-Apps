@@ -14,8 +14,13 @@ from ccpi.viewer.QVTKWidget import QVTKWidget
 # Will be replaced to read the data from the loaded image.
 from ccpi.viewer.undirected_graph import generate_data
 
+import datetime
+
 # Import modules requred to run the QT application
-from PyQt5 import QtCore, QtGui, QtWidgets, Qt
+from PyQt5 import QtCore, QtGui, QtWidgets, Qt 
+from PyQt5.QtCore import pyqtSignal, pyqtSlot , QThreadPool
+import sys, traceback
+
 import vtk
 from natsort import natsorted
 import imghdr
@@ -125,6 +130,10 @@ class Ui_MainWindow(object):
         self.toolbar()
 
         self.e = ErrorObserver()
+        
+        #self.threadpool = QThreadPool()
+        #print("Multithreading with maximum %d threads" % self.threadpool.maxThreadCount())
+
 
 
     def toolbar(self):
@@ -380,7 +389,7 @@ class Ui_MainWindow(object):
     def displayTree(self):
         tree = self.segmentor.getContourTree()
 
-        self.graphWidget.viewer.updateCornerAnnotation("featureAnnotation", "Features: {}".format(len(tree)/2))
+        #self.graphWidget.viewer.updateCornerAnnotation("featureAnnotation", "Features: {}".format(len(tree)/2))
 
         graph = vtk.vtkMutableDirectedGraph()
         X = vtk.vtkDoubleArray()
@@ -443,8 +452,10 @@ class Ui_MainWindow(object):
         layoutStrategy.SetXCoordArrayName('X')
 
         self.graphWidget.viewer.update(graph)
-
+        
     def displaySurfaces(self):
+        a = datetime.datetime.now()
+        
         #Display isosurfaces in 3D
         # Create the VTK output
         # Points coordinates structure
@@ -452,11 +463,15 @@ class Ui_MainWindow(object):
 
         # associate the points to triangles
         triangle = vtk.vtkTriangle()
+        trianglePointIds = triangle.GetPointIds()
 
         # put all triangles in an array
         triangles = vtk.vtkCellArray()
+        
+        surface_data = vtk.vtkIntArray()
+        surface_data.SetNumberOfComponents(1)
+        surface_data.SetName("SurfaceId")
         isTriangle = 0
-        nTriangle = 0
 
         surface = 0
         # associate each coordinate with a point: 3 coordinates are needed for a point
@@ -466,6 +481,7 @@ class Ui_MainWindow(object):
         origin = self.origin
         spacing = self.spacing
 
+        print("Origin " , origin , "Spacing " , spacing)
         # augmented matrix for affine transformations
         mScaling = numpy.asarray([spacing[0], 0, 0, 0,
                                   0, spacing[1], 0, 0,
@@ -485,14 +501,17 @@ class Ui_MainWindow(object):
             print("Image-to-world coordinate trasformation ... %d" % surface)
             for point in surf:
                 world_coord = numpy.dot(mTransform, point)
-                xCoord = world_coord[0]
-                yCoord = world_coord[1]
-                zCoord = world_coord[2]
-                triangle_vertices.InsertNextPoint(xCoord, yCoord, zCoord);
+                #xCoord = world_coord[0]
+                #yCoord = world_coord[1]
+                #zCoord = world_coord[2]
+                #triangle_vertices.InsertNextPoint(xCoord, yCoord, zCoord);
+                triangle_vertices.InsertNextPoint(world_coord[0], 
+                                                  world_coord[1], 
+                                                  world_coord[2])
 
                 # The id of the vertex of the triangle (0,1,2) is linked to
                 # the id of the points in the list, so in facts we just link id-to-id
-                triangle.GetPointIds().SetId(isTriangle, point_count)
+                trianglePointIds.SetId(isTriangle, point_count)
                 isTriangle += 1
                 point_count += 1
 
@@ -500,16 +519,47 @@ class Ui_MainWindow(object):
                     isTriangle = 0;
                     # insert the current triangle in the triangles array
                     triangles.InsertNextCell(triangle);
+                    surface_data.InsertNextValue(surface)
 
-        surface += 1
+            surface += 1
 
+        
         # polydata object
         trianglePolyData = vtk.vtkPolyData()
         trianglePolyData.SetPoints(triangle_vertices)
         trianglePolyData.SetPolys(triangles)
+        trianglePolyData.GetCellData().AddArray(surface_data)
 
+        
+        b = datetime.datetime.now()
+        print ("Creation of surfaces with Python took seconds " , (b-a).total_seconds())
+        
         self.viewer3DWidget.viewer.hideActor(1, delete = True)
+        
+        actors = self.viewer3DWidget.viewer.actors
+        
         self.viewer3DWidget.viewer.displayPolyData(trianglePolyData)
+        
+        if True:
+            # change the color of the polydata actors
+            named_colors = vtk.vtkNamedColors()
+            all_colors = named_colors.GetColorNames().split('\n')
+            lut = vtk.vtkLookupTable()
+            lut.SetNumberOfTableValues(surface)
+            lut.Build()
+            for i in range(surface):
+                R,G,B = named_colors.GetColor3d(all_colors[i])
+                lut.SetTableValue(i,R,G,B)
+            
+            actors[1][0].GetMapper().SetLookupTable(lut)
+            actors[1][0].GetMapper().SetScalarRange(0,surface)
+            actors[1][0].GetMapper().SetScalarModeToUseCellFieldData()
+            actors[1][0].GetMapper().SelectColorArray('SurfaceId')
+            actors[1][0].GetMapper().Update()
+        else:
+            actors[1][0].GetProperty().SetColor(1,0,0) # red
+            
+        
 
     def openFile(self):
         fn = QtWidgets.QFileDialog.getOpenFileNames(self.mainwindow, 'Open File','../../../../../data')
@@ -580,6 +630,79 @@ class Ui_MainWindow(object):
         msg.setText("Error reading file: ({filename})".format(filename=file))
         msg.setDetailedText(self.e.ErrorMessage())
         msg.exec_()
+
+
+class WorkerSignals(QtCore.QObject):
+    '''
+    Defines the signals available from a running worker thread.
+
+    Supported signals are:
+
+    finished
+        No data
+
+    error
+        `tuple` (exctype, value, traceback.format_exc() )
+
+    result
+        `object` data returned from processing, anything
+
+    progress
+        `int` indicating % progress
+
+    '''
+    finished = pyqtSignal()
+    error = pyqtSignal(tuple)
+    result = pyqtSignal(object)
+    progress = pyqtSignal(int)
+
+
+class Worker(QtCore.QRunnable):
+    '''
+    Worker thread
+
+    Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
+
+    :param callback: The function callback to run on this worker thread. Supplied args and 
+                     kwargs will be passed through to the runner.
+    :type callback: function
+    :param args: Arguments to pass to the callback function
+    :param kwargs: Keywords to pass to the callback function
+
+    '''
+
+    def __init__(self, fn, *args, **kwargs):
+        super(Worker, self).__init__()
+
+        # Store constructor arguments (re-used for processing)
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = WorkerSignals()
+
+        # Add the callback to our kwargs
+        self.kwargs['progress_callback'] = self.signals.progress
+
+    @pyqtSlot()
+    def run(self):
+        '''
+        Initialise the runner function with passed args, kwargs.
+        '''
+
+        # Retrieve args/kwargs here; and fire processing using them
+        try:
+            result = self.fn(*self.args, **self.kwargs)
+        except:
+            traceback.print_exc()
+            exctype, value = sys.exc_info()[:2]
+            self.signals.error.emit((exctype, value, traceback.format_exc()))
+        else:
+            self.signals.result.emit(result)  # Return the result of the processing
+        finally:
+            self.signals.finished.emit()  # Done
+
+
+
 
 
 def main():
