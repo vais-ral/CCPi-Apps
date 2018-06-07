@@ -7,7 +7,7 @@ from Cython.Distutils import build_ext
 
 import os
 import sys
-#import numpy
+import numpy
 import platform	
 
 cil_version=os.environ['CIL_VERSION']
@@ -24,7 +24,7 @@ except:
     library_include_path = os.environ['PREFIX']+'/include'
     pass
     
-extra_include_dirs = [library_include_path]
+extra_include_dirs = [library_include_path, numpy.get_include()]
 extra_compile_args = []
 extra_library_dirs = []
 extra_compile_args = []

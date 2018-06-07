@@ -8,8 +8,9 @@ Created on Mon Jun  4 06:43:46 2018
 import cython
 import vtk
 import numpy
+cimport numpy
 
-def displaySurfaces(self, origin, spacing, surf_list):
+def s2pd(origin, spacing, surf_list):
     #Display isosurfaces in 3D
     # Create the VTK output
     # Points coordinates structure
@@ -17,7 +18,8 @@ def displaySurfaces(self, origin, spacing, surf_list):
 
     # associate the points to triangles
     triangle = vtk.vtkTriangle()
-
+    trianglePointId = triangle.GetPointIds()
+    
     # put all triangles in an array
     triangles = vtk.vtkCellArray()
     cdef int isTriangle = 0
@@ -39,23 +41,31 @@ def displaySurfaces(self, origin, spacing, surf_list):
                             0, 0, 1, origin[2],
                             0, 0, 0, 1]).reshape((4, 4))
 
-    mTransform = numpy.dot(mScaling, mShift)
+    cdef numpy.ndarray mTransform = numpy.dot(mScaling, mShift)
     cdef int point_count = 0
     cdef int i = 0
+    cdef numpy.ndarray point 
+    cdef numpy.ndarray world_coord
+    
     
     for surf in surf_list:
         print("Image-to-world coordinate trasformation ... %d" % surface)
         for i in range(len(surf)):
             point = surf[i]
             world_coord = numpy.dot(mTransform, point)
-            xCoord = world_coord[0]
-            yCoord = world_coord[1]
-            zCoord = world_coord[2]
-            triangle_vertices.InsertNextPoint(xCoord, yCoord, zCoord);
+            #xCoord = world_coord[0]
+            #yCoord = world_coord[1]
+            #zCoord = world_coord[2]
+            #xCoord = point[0] * (xSpacing) + xOrigin;
+            #yCoord = point[1] * (ySpacing) + yOrigin;
+            #zCoord = point[2] * (zSpacing) + zOrigin;
+            triangle_vertices.InsertNextPoint(world_coord[0], 
+                                              world_coord[1], 
+                                              world_coord[2]);
 
             # The id of the vertex of the triangle (0,1,2) is linked to
             # the id of the points in the list, so in facts we just link id-to-id
-            triangle.GetPointIds().SetId(isTriangle, point_count)
+            trianglePointId.SetId(isTriangle, point_count)
             isTriangle += 1
             point_count += 1
 
@@ -64,7 +74,7 @@ def displaySurfaces(self, origin, spacing, surf_list):
                 # insert the current triangle in the triangles array
                 triangles.InsertNextCell(triangle);
 
-    surface += 1
+        surface += 1
 
     # polydata object
     trianglePolyData = vtk.vtkPolyData()
