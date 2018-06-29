@@ -1,4 +1,13 @@
-# -*- coding: utf-8 -*-
+"""
+QT based app to bring together several interactions with the dataset. 2D slicing, 3D visualisation and segmentation and countour tree.
+
+Author: Richard Smith
+Date: 29th June 2018
+
+Segmentation and Contour Tree
+Author: Edoardo Pasca
+
+"""
 
 
 

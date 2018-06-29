@@ -1,3 +1,12 @@
+"""
+Simple QT application to add load and save tools to the CIL Viewer
+
+Author: Richard Smith
+Date: 29th June 2018
+
+"""
+
+
 import sys
 from PyQt5 import QtGui, QtCore
 from PyQt5.QtWidgets import *
