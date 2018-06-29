@@ -14,13 +14,8 @@ from ccpi.viewer.QVTKWidget import QVTKWidget
 # Will be replaced to read the data from the loaded image.
 from ccpi.viewer.undirected_graph import generate_data
 
-import datetime
-
 # Import modules requred to run the QT application
-from PyQt5 import QtCore, QtGui, QtWidgets, Qt 
-from PyQt5.QtCore import pyqtSignal, pyqtSlot , QThreadPool
-import sys, traceback
-
+from PyQt5 import QtCore, QtGui, QtWidgets, Qt
 import vtk
 from natsort import natsorted
 import imghdr
@@ -31,6 +26,13 @@ import ccpi.viewer.viewerLinker as vlink
 # Import segmenation algorithm and tools
 from ccpi.segmentation.SimpleflexSegmentor import SimpleflexSegmentor
 import numpy
+
+import sys, traceback
+
+
+class ReadError(Exception):
+    """Raised when there is a problem reading the file into vtk"""
+
 
 class ErrorObserver:
 
@@ -51,6 +53,76 @@ class ErrorObserver:
    def ErrorMessage(self):
        return self.__ErrorMessage
 
+class Worker(QtCore.QRunnable):
+    """
+    Worker thread
+
+    Inherits from QRunnable to handle worker thread setup, signals and wrapup.
+
+    :param (function) callback:
+        The function callback to run on this worker thread. Supplied
+        args/kwargs will be pass to the runner.
+
+    :param args:
+        Arguments to pass to the callback function
+
+    :param kwargs:
+        Keyword arguments to pass to the callback function
+
+    """
+    def __init__(self, fn, *args, **kwargs):
+        super(Worker, self).__init__()
+
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = WorkerSignals()
+
+        # Add progress callback to kwargs
+        self.kwargs['progress_callback'] = self.signals.progress
+
+    @QtCore.pyqtSlot()
+    def run(self):
+        """
+        Run the worker. Emits signals based on run state.
+        Signals:
+            - Error: Emitted when an exception is thrown in the workers function.
+            - Result: Emitted if function completes successfully. Contains the return value of the function.
+            - Finished: Emitted on completion of the worker thread.
+
+        """
+        try:
+            result = self.fn(*self.args, **self.kwargs)
+        except:
+            traceback.print_exc()
+            exctype, value = sys.exc_info()[:2]
+            self.signals.error.emit((exctype, value, traceback.format_exc()))
+        else:
+            self.signals.result.emit(result)
+        finally:
+            self.signals.finished.emit()
+
+class WorkerSignals(QtCore.QObject):
+    """
+    Defines signals available when running a worker thread
+    Supported Signals:
+    finished
+        No Data
+
+    error
+        `tuple` (exctype, value, traceback.format_exc() )
+
+    result
+        `object` data returned from processing, anything
+
+    progress
+        `int` indicating % progress
+    """
+
+    finished = QtCore.pyqtSignal()
+    error = QtCore.pyqtSignal(tuple)
+    result = QtCore.pyqtSignal(object)
+    progress = QtCore.pyqtSignal(int)
 
 def sentenceCase(string):
     if string:
@@ -65,12 +137,18 @@ def sentenceCase(string):
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         self.mainwindow = MainWindow
-        MainWindow.setObjectName("CIL Viewer")
         MainWindow.setWindowTitle("CIL Viewer")
         MainWindow.resize(800, 600)
 
+        # Contains response from open file dialog
+        self.fn = None
+
         # Set linked state
         self.linked = True
+
+        # Create link icon for inital load state.
+        link_icon = QtGui.QIcon()
+        link_icon.addPixmap(QtGui.QPixmap('icons/link.png'), QtGui.QIcon.Normal, QtGui.QIcon.Off)
 
         # Set numpy data array for graph
         self.graph_numpy_input_data = None
@@ -79,31 +157,59 @@ class Ui_MainWindow(object):
         self.hasDockableWindow = False
 
         self.centralwidget = QtWidgets.QWidget(MainWindow)
-        self.centralwidget.setObjectName("centralwidget")
 
         # Central widget layout
-        self.horizontalLayout = QtWidgets.QHBoxLayout(self.centralwidget)
-        self.horizontalLayout.setObjectName("horizontalLayout")
+        self.main_widget_form_layout = QtWidgets.QGridLayout(self.centralwidget)
 
         # Add the 2D viewer widget
         self.viewerWidget = QVTKWidget(viewer=CILViewer2D, interactorStyle=vlink.Linked2DInteractorStyle)
-        self.horizontalLayout.addWidget(self.viewerWidget, 66)
+        self.centralwidget.setStyleSheet("background-color: rgb(25,51,101)")
 
-        # Create the vertical layout to handle the other displays
-        self.verticalLayout = QtWidgets.QVBoxLayout()
-        self.verticalLayout.setObjectName("verticalLayout")
+        self.linkButton2D = QtWidgets.QPushButton(self.viewerWidget)
+        self.linkButton2D.setIcon(link_icon)
+        self.linkButton2D.setGeometry(0, 0, 30, 30)
+        self.linkButton2D.setStyleSheet("background-color: whitesmoke")
+        self.linkButton2D.setToolTip("State: Linked. Toggle status of link between 2D and 3D viewers")
+
+        self.linkButton2D.clicked.connect(self.linkViewers)
+
+        self.main_widget_form_layout.addWidget(self.linkButton2D, 0,0,1,1)
+        self.main_widget_form_layout.addItem(QtWidgets.QSpacerItem(1,1,QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Maximum),0,1,1,1)
+        self.main_widget_form_layout.addWidget(self.viewerWidget,1,0,1,2)
 
         # Add the graph widget
         self.graphWidget = QVTKWidget(viewer=UndirectedGraph)
-        self.verticalLayout.addWidget(self.graphWidget)
-        # self.graphWidget.viewer.update(generate_data())
+
+        self.graphDock = QtWidgets.QDockWidget(MainWindow)
+        self.graphDock.setMinimumWidth(300)
+        self.graphDock.setWidget(self.graphWidget)
+        self.graphDock.setWindowTitle("Graph View")
+
+        MainWindow.addDockWidget(QtCore.Qt.LeftDockWidgetArea, self.graphDock)
 
         # Add the 3D viewer widget
         self.viewer3DWidget = QVTKWidget(viewer=CILViewer, interactorStyle=vlink.Linked3DInteractorStyle)
-        self.verticalLayout.addWidget(self.viewer3DWidget)
 
-        # Add vertical layout to main layout
-        self.horizontalLayout.addLayout(self.verticalLayout, 33)
+        self.Dock3DContents = QtWidgets.QWidget()
+        self.Dock3DContents.setStyleSheet("background-color: rgb(25,51,101)")
+        f_layout3D = Qt.QFormLayout(self.Dock3DContents)
+
+        self.Dock3D = QtWidgets.QDockWidget(MainWindow)
+        self.Dock3D.setMinimumWidth(300)
+        self.Dock3D.setWindowTitle("3D View")
+
+        self.linkButton3D = QtWidgets.QPushButton(self.viewer3DWidget)
+        self.linkButton3D.setIcon(link_icon)
+        self.linkButton3D.setGeometry(0,0,30,30)
+        self.linkButton3D.setStyleSheet("background-color: whitesmoke")
+        self.linkButton3D.setToolTip("State: Linked. Toggle status of link between 2D and 3D viewers")
+
+        self.linkButton3D.clicked.connect(self.linkViewers)
+
+        f_layout3D.addWidget(self.linkButton3D)
+        f_layout3D.addWidget(self.viewer3DWidget)
+        self.Dock3D.setWidget(self.Dock3DContents)
+        MainWindow.addDockWidget(QtCore.Qt.LeftDockWidgetArea, self.Dock3D)
 
         # Set central widget
         MainWindow.setCentralWidget(self.centralwidget)
@@ -119,7 +225,6 @@ class Ui_MainWindow(object):
 
         #Create status bar
         self.statusbar = QtWidgets.QStatusBar(MainWindow)
-        self.statusbar.setObjectName("statusbar")
         MainWindow.setStatusTip('Open file to begin visualisation...')
         MainWindow.setStatusBar(self.statusbar)
 
@@ -127,14 +232,42 @@ class Ui_MainWindow(object):
         self.linkedViewersSetup()
         self.link2D3D.enable()
 
+        # Create the toolbar
         self.toolbar()
 
+        # Add threading
+        self.threadpool = QtCore.QThreadPool()
         self.e = ErrorObserver()
-        
-        #self.threadpool = QThreadPool()
-        #print("Multithreading with maximum %d threads" % self.threadpool.maxThreadCount())
 
+        # Add progress bar
+        self.progressBar = QtWidgets.QProgressBar()
+        self.progressBar.setMaximumWidth(250)
+        self.progressBar.hide()
+        self.statusbar.addPermanentWidget(self.progressBar)
 
+    def linkViewers(self, force_linked=False):
+
+        link_icon = QtGui.QIcon()
+        link_icon.addPixmap(QtGui.QPixmap('icons/link.png'), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+
+        link_icon_broken = QtGui.QIcon()
+        link_icon_broken.addPixmap(QtGui.QPixmap('icons/broken_link.png'), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+
+        if self.linked and not force_linked:
+            self.link2D3D.disable()
+            self.linkButton3D.setIcon(link_icon_broken)
+            self.linkButton2D.setIcon(link_icon_broken)
+            self.linkButton3D.setToolTip("State: Un-linked. Toggle status of link between 2D and 3D viewers")
+            self.linkButton2D.setToolTip("State: Un-linked. Toggle status of link between 2D and 3D viewers")
+            self.linked = False
+
+        else:
+            self.link2D3D.enable()
+            self.linkButton3D.setIcon(link_icon)
+            self.linkButton2D.setIcon(link_icon)
+            self.linkButton3D.setToolTip("State: Linked. Toggle status of link between 2D and 3D viewers")
+            self.linkButton2D.setToolTip("State: Linked. Toggle status of link between 2D and 3D viewers")
+            self.linked = True
 
     def toolbar(self):
         # Initialise the toolbar
@@ -142,7 +275,7 @@ class Ui_MainWindow(object):
 
         # define actions
         openAction = QtWidgets.QAction(self.mainwindow.style().standardIcon(QtWidgets.QStyle.SP_DirOpenIcon), 'Open file', self.mainwindow)
-        openAction.triggered.connect(self.openFile)
+        openAction.triggered.connect(self.openFileTrigger)
 
         saveAction = QtWidgets.QAction(self.mainwindow.style().standardIcon(QtWidgets.QStyle.SP_DialogSaveButton), 'Save current render as PNG', self.mainwindow)
         saveAction.triggered.connect(self.saveFile)
@@ -153,16 +286,19 @@ class Ui_MainWindow(object):
         connectGraphAction = QtWidgets.QAction(tree_icon, 'Set Graph Widget parameters', self.mainwindow)
         connectGraphAction.triggered.connect(self.createDockableWindow)
 
-        link_icon = QtGui.QIcon()
-        link_icon.addPixmap(QtGui.QPixmap('icons/link.png'),QtGui.QIcon.Normal, QtGui.QIcon.Off)
-        self.linkViewersAction = QtWidgets.QAction(link_icon,'Toggle link between 2D and 3D viewers', self.mainwindow)
-        self.linkViewersAction.triggered.connect(self.toggleLink)
+
+
+        show_icon = QtGui.QIcon()
+        show_icon.addPixmap(QtGui.QPixmap('icons/show.png'),QtGui.QIcon.Normal, QtGui.
+                            QIcon.Off)
+        showWidgetsAction = QtWidgets.QAction(show_icon, 'Display tree and 3D viewer', self.mainwindow)
+        showWidgetsAction.triggered.connect(self.dockWidgets)
 
         # Add actions to toolbar
         self.toolbar.addAction(openAction)
         self.toolbar.addAction(saveAction)
         self.toolbar.addAction(connectGraphAction)
-        self.toolbar.addAction(self.linkViewersAction)
+        self.toolbar.addAction(showWidgetsAction)
 
     def linkedViewersSetup(self):
         self.link2D3D = vlink.ViewerLinker(self.viewerWidget.viewer, self.viewer3DWidget.viewer)
@@ -170,26 +306,6 @@ class Ui_MainWindow(object):
         self.link2D3D.setLinkZoom(False)
         self.link2D3D.setLinkWindowLevel(True)
         self.link2D3D.setLinkSlice(True)
-
-    def toggleLink(self):
-        link_icon = QtGui.QIcon()
-        link_icon.addPixmap(QtGui.QPixmap('icons/link.png'),QtGui.QIcon.Normal, QtGui.QIcon.Off)
-
-        link_icon_broken = QtGui.QIcon()
-        link_icon_broken.addPixmap(QtGui.QPixmap('icons/broken_link.png'),QtGui.QIcon.Normal, QtGui.QIcon.Off)
-
-        if self.linked:
-            self.link2D3D.disable()
-            self.linkViewersAction.setIcon(link_icon_broken)
-            self.linked = False
-
-        else:
-            self.link2D3D.enable()
-            self.linkViewersAction.setIcon(link_icon)
-            self.linked = True
-
-    # def closeEvent(self):
-    #     print ("Closing")
 
     def createDockableWindow(self):
 
@@ -216,33 +332,26 @@ class Ui_MainWindow(object):
         self.segmentor = SimpleflexSegmentor()
 
         self.graphDockWidget = QtWidgets.QDockWidget(self.mainwindow)
-        self.graphDockWidget.setObjectName("dockWidget_3")
         self.graphDockWidgetContents = QtWidgets.QWidget()
-        self.graphDockWidgetContents.setObjectName("dockWidgetContents_3")
 
 
         # Add vertical layout to dock contents
         self.graphDockVL = QtWidgets.QVBoxLayout(self.graphDockWidgetContents)
         self.graphDockVL.setContentsMargins(0, 0, 0, 0)
-        self.graphDockVL.setObjectName("verticalLayout_3")
 
         # Create widget for dock contents
         self.dockWidget = QtWidgets.QWidget(self.graphDockWidgetContents)
-        self.dockWidget.setObjectName("widget")
 
         # Add vertical layout to dock widget
         self.graphWidgetVL = QtWidgets.QVBoxLayout(self.dockWidget)
         self.graphWidgetVL.setContentsMargins(0, 0, 0, 0)
-        self.graphWidgetVL.setObjectName("verticalLayout_3")
 
         # Add group box
         self.graphParamsGroupBox = QtWidgets.QGroupBox(self.dockWidget)
-        self.graphParamsGroupBox.setObjectName("groupBox")
         self.graphParamsGroupBox.setTitle("Graph Parameters")
 
         # Add form layout to group box
         self.graphWidgetFL = QtWidgets.QFormLayout(self.graphParamsGroupBox)
-        self.graphWidgetFL.setObjectName("formLayout_2")
 
         # Create validation rule for text entry
         validator = QtGui.QDoubleValidator()
@@ -250,9 +359,8 @@ class Ui_MainWindow(object):
 
         # Add button to run graphing function
         self.graphStart = QtWidgets.QPushButton(self.graphParamsGroupBox)
-        self.graphStart.setObjectName("graphStart")
         self.graphStart.setText("Generate Graph")
-        self.graphStart.clicked.connect(self.generateGraph)
+        self.graphStart.clicked.connect(self.generateGraphTrigger)
         self.graphWidgetFL.setWidget(0, QtWidgets.QFormLayout.SpanningRole, self.graphStart)
         self.treeWidgetInitialElements.append(self.graphStart)
 
@@ -265,11 +373,9 @@ class Ui_MainWindow(object):
 
         # Add ISO Value field
         self.isoValueLabel = QtWidgets.QLabel(self.graphParamsGroupBox)
-        self.isoValueLabel.setObjectName("fieldLabel1")
         self.isoValueLabel.setText("Iso Value (%)")
         self.graphWidgetFL.setWidget(2, QtWidgets.QFormLayout.LabelRole, self.isoValueLabel)
         self.isoValueEntry= QtWidgets.QLineEdit(self.graphParamsGroupBox)
-        self.isoValueEntry.setObjectName("lineEdit_1")
         self.isoValueEntry.setValidator(validator)
         self.isoValueEntry.setText("35")
         self.graphWidgetFL.setWidget(2, QtWidgets.QFormLayout.FieldRole, self.isoValueEntry)
@@ -280,31 +386,32 @@ class Ui_MainWindow(object):
         self.isGlobalCheck = QtWidgets.QCheckBox(self.graphParamsGroupBox)
         self.isGlobalCheck.setText("Global Iso")
         self.isGlobalCheck.setChecked(True)
-        self.graphWidgetFL.setWidget(3, QtWidgets.QFormLayout.FieldRole, self.isGlobalCheck)
+        self.graphWidgetFL.setWidget(3, QtWidgets.QFormLayout.LabelRole, self.isGlobalCheck)
         self.treeWidgetUpdateElements.append(self.isGlobalCheck)
+
+        # Add colour surfaces checkbox
+        self.surfaceColourCheck = QtWidgets.QCheckBox(self.graphParamsGroupBox)
+        self.surfaceColourCheck.setText("Colour Surfaces")
+        self.graphWidgetFL.setWidget(3,QtWidgets.QFormLayout.FieldRole, self.surfaceColourCheck)
+        self.treeWidgetUpdateElements.append(self.surfaceColourCheck)
 
         # Add Log Tree field
         self.logTreeValueLabel = QtWidgets.QLabel(self.graphParamsGroupBox)
-        self.logTreeValueLabel.setObjectName("fieldLabel_2")
         self.logTreeValueLabel.setText("Log Tree Size")
         self.graphWidgetFL.setWidget(4, QtWidgets.QFormLayout.LabelRole, self.logTreeValueLabel)
         self.logTreeValueEntry = QtWidgets.QLineEdit(self.graphParamsGroupBox)
-        self.logTreeValueEntry.setObjectName("lineEdit_2")
         self.logTreeValueEntry.setValidator(validator)
         self.logTreeValueEntry.setText("0.34")
         self.treeWidgetUpdateElements.append(self.logTreeValueEntry)
         self.treeWidgetUpdateElements.append(self.logTreeValueLabel)
 
-
         self.graphWidgetFL.setWidget(4, QtWidgets.QFormLayout.FieldRole, self.logTreeValueEntry)
 
-        # Add third field
+        # Add collapse priority field
         self.collapsePriorityLabel = QtWidgets.QLabel(self.graphParamsGroupBox)
-        self.collapsePriorityLabel.setObjectName("fieldLabel_3")
         self.collapsePriorityLabel.setText("Collapse Priority")
         self.graphWidgetFL.setWidget(5, QtWidgets.QFormLayout.LabelRole, self.collapsePriorityLabel)
         self.collapsePriorityValue = QtWidgets.QComboBox(self.graphParamsGroupBox)
-        self.collapsePriorityValue.setObjectName("comboBox")
         self.collapsePriorityValue.addItem("Height")
         self.collapsePriorityValue.addItem("Volume")
         self.collapsePriorityValue.addItem("Hypervolume")
@@ -313,17 +420,14 @@ class Ui_MainWindow(object):
         self.treeWidgetUpdateElements.append(self.collapsePriorityValue)
         self.treeWidgetUpdateElements.append(self.collapsePriorityLabel)
 
-
         self.graphWidgetFL.setWidget(5, QtWidgets.QFormLayout.FieldRole, self.collapsePriorityValue)
 
         # Add submit button
         self.graphParamsSubmitButton = QtWidgets.QPushButton(self.graphParamsGroupBox)
-        self.graphParamsSubmitButton.setObjectName("graphParamsSubmitButton")
         self.graphParamsSubmitButton.setText("Update")
-        self.graphParamsSubmitButton.clicked.connect(self.updateGraph)
+        self.graphParamsSubmitButton.clicked.connect(self.updateGraphTrigger)
         self.graphWidgetFL.setWidget(6, QtWidgets.QFormLayout.FieldRole, self.graphParamsSubmitButton)
         self.treeWidgetUpdateElements.append(self.graphParamsSubmitButton)
-
 
         # Add elements to layout
         self.graphWidgetVL.addWidget(self.graphParamsGroupBox)
@@ -332,12 +436,28 @@ class Ui_MainWindow(object):
         self.mainwindow.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.graphDockWidget)
 
         # Set update elements to disabled when first opening the window
-        if self.graph_numpy_input_data is None:
+        if self.segmentor.dimensions is None:
             for element in self.treeWidgetUpdateElements:
                 element.setEnabled(False)
 
+    def dockWidgets(self):
+        """
+        The 3D viewer widget and graph widget are Dockable windows. Once closed, they are hidden.
+        This method makes them visible again.
+        """
 
-    def updateGraph(self):
+        self.Dock3D.show()
+        self.graphDock.show()
+
+    def updateGraph(self, progress_callback):
+        """
+        Make updates to the graph based on user input.
+
+        :param (function) progress_callback:
+            Function to perform to emit progress signal.
+
+        """
+
         # Set parameter values
         isoVal = float(self.isoValueEntry.text())
         logTreeVal = float(self.logTreeValueEntry.text())
@@ -351,45 +471,50 @@ class Ui_MainWindow(object):
 
         # Update tree
         self.segmentor.updateTreeFromLogTreeSize(logTreeVal, self.isGlobalCheck.isChecked())
+        progress_callback.emit(30)
 
         # Display results
-        self.displaySurfaces()
+        self.displaySurfaces(progress_callback)
         self.displayTree()
 
-    def generateGraph(self):
 
-        if self.graph_numpy_input_data is not None:
+    def generateGraph(self, progress_callback):
+        """
+        Generates the initial graph and 3D surface render
 
-            self.segmentor.setInputData(self.graph_numpy_input_data)
-            self.segmentor.calculateContourTree()
+        :param (function) progress_callback:
+            Function to perform to emit progress signal.
 
-            self.segmentor.setIsoValuePercent(float(self.isoValueEntry.text()))
-            self.segmentor.collapsePriority = self.collapsePriorityValue.currentIndex()
-            self.segmentor.updateTreeFromLogTreeSize(float(self.logTreeValueEntry.text()), self.isGlobalCheck.isChecked())
+        """
 
-            # Display results
-            self.displaySurfaces()
-            self.displayTree()
+        self.segmentor.setInputData(self.graph_numpy_input_data)
+        progress_callback.emit(5)
 
-            # Once the graph has generated allow editing of the values and disable the generate button
-            for element in self.treeWidgetUpdateElements:
-                element.setEnabled(True)
+        self.segmentor.calculateContourTree()
+        progress_callback.emit(25)
 
-            for element in self.treeWidgetInitialElements:
-                element.setEnabled(False)
-        else:
-            msg = QtWidgets.QMessageBox(self.mainwindow)
-            msg.setIcon(QtWidgets.QMessageBox.Critical)
-            msg.setWindowTitle("NO DATA")
-            msg.setText("No data has been loaded into the reader. Please load a file to run the graph.")
-            msg.exec_()
+        self.segmentor.setIsoValuePercent(float(self.isoValueEntry.text()))
+        self.segmentor.collapsePriority = self.collapsePriorityValue.currentIndex()
+        self.segmentor.updateTreeFromLogTreeSize(float(self.logTreeValueEntry.text()), self.isGlobalCheck.isChecked())
+        progress_callback.emit(30)
+
+        # Display results
+        self.displaySurfaces(progress_callback)
+        self.displayTree()
+
+        # Once the graph has generated allow editing of the values and disable the generate button
+        for element in self.treeWidgetUpdateElements:
+            element.setEnabled(True)
+
+        for element in self.treeWidgetInitialElements:
+            element.setEnabled(False)
 
 
 
     def displayTree(self):
         tree = self.segmentor.getContourTree()
 
-        #self.graphWidget.viewer.updateCornerAnnotation("featureAnnotation", "Features: {}".format(len(tree)/2))
+        self.graphWidget.viewer.updateCornerAnnotation("featureAnnotation", "Features: {}".format(len(tree)/2))
 
         graph = vtk.vtkMutableDirectedGraph()
         X = vtk.vtkDoubleArray()
@@ -404,6 +529,10 @@ class Ui_MainWindow(object):
         weights.SetNumberOfComponents(1)
         weights.SetName("Weights")
 
+        vertex_id = vtk.vtkDoubleArray()
+        vertex_id.SetNumberOfComponents(1)
+        vertex_id.SetName("VertexID")
+
         print("creating graph")
         # Adding to graph now
         N = int(len(tree) / 2)
@@ -411,6 +540,7 @@ class Ui_MainWindow(object):
         # normalise the values in Y
         # transpose tree
         treeT = list(zip(*tree))
+
         maxY = max(treeT[1])
         minY = min(treeT[1])
         deltaY = maxY - minY
@@ -440,11 +570,14 @@ class Ui_MainWindow(object):
             Y.InsertNextValue((v[1][1] - minY)/ deltaY )
 
             weights.InsertNextValue(1.)
+            vertex_id.InsertNextValue(2*i)
+            vertex_id.InsertNextValue(2*i+1)
         print("Finished")  # Execution reaches here, error seems to be in cleanup upon closing
 
         graph.GetVertexData().AddArray(X)
         graph.GetVertexData().AddArray(Y)
         graph.GetEdgeData().AddArray(weights)
+        graph.GetVertexData().AddArray(vertex_id)
 
         print("Added Data")
         layoutStrategy = vtk.vtkAssignCoordinatesLayoutStrategy()
@@ -452,12 +585,15 @@ class Ui_MainWindow(object):
         layoutStrategy.SetXCoordArrayName('X')
 
         self.graphWidget.viewer.update(graph)
-        
-    def displaySurfaces(self):
-        a = datetime.datetime.now()
-        
-        #Display isosurfaces in 3D
-        # Create the VTK output
+
+    def displaySurfaces(self, progress_callback):
+        """
+        Create the VTK data structures and display a 3D surface based on the input image.
+
+        :param (function) progress_callback:
+            Function to emit progress signals
+        """
+
         # Points coordinates structure
         triangle_vertices = vtk.vtkPoints()
 
@@ -467,11 +603,12 @@ class Ui_MainWindow(object):
 
         # put all triangles in an array
         triangles = vtk.vtkCellArray()
-        
+
         surface_data = vtk.vtkIntArray()
         surface_data.SetNumberOfComponents(1)
         surface_data.SetName("SurfaceId")
         isTriangle = 0
+        nTriangle = 0
 
         surface = 0
         # associate each coordinate with a point: 3 coordinates are needed for a point
@@ -481,7 +618,6 @@ class Ui_MainWindow(object):
         origin = self.origin
         spacing = self.spacing
 
-        print("Origin " , origin , "Spacing " , spacing)
         # augmented matrix for affine transformations
         mScaling = numpy.asarray([spacing[0], 0, 0, 0,
                                   0, spacing[1], 0, 0,
@@ -497,16 +633,15 @@ class Ui_MainWindow(object):
 
         surf_list = self.segmentor.getSurfaces()
 
-        for surf in surf_list:
+        # Calculate the increment for each of the surfaces
+        increment = 60.0/len(surf_list)
+
+        for n, surf in enumerate(surf_list,1):
             print("Image-to-world coordinate trasformation ... %d" % surface)
             for point in surf:
                 world_coord = numpy.dot(mTransform, point)
-                #xCoord = world_coord[0]
-                #yCoord = world_coord[1]
-                #zCoord = world_coord[2]
-                #triangle_vertices.InsertNextPoint(xCoord, yCoord, zCoord);
-                triangle_vertices.InsertNextPoint(world_coord[0], 
-                                                  world_coord[1], 
+                triangle_vertices.InsertNextPoint(world_coord[0],
+                                                  world_coord[1],
                                                   world_coord[2])
 
                 # The id of the vertex of the triangle (0,1,2) is linked to
@@ -516,53 +651,138 @@ class Ui_MainWindow(object):
                 point_count += 1
 
                 if (isTriangle == 3):
-                    isTriangle = 0;
+                    isTriangle = 0
                     # insert the current triangle in the triangles array
-                    triangles.InsertNextCell(triangle);
+                    triangles.InsertNextCell(triangle)
                     surface_data.InsertNextValue(surface)
 
+            progress_callback.emit(int(n*increment + 30))
             surface += 1
 
-        
         # polydata object
         trianglePolyData = vtk.vtkPolyData()
         trianglePolyData.SetPoints(triangle_vertices)
         trianglePolyData.SetPolys(triangles)
         trianglePolyData.GetCellData().AddArray(surface_data)
 
-        
-        b = datetime.datetime.now()
-        print ("Creation of surfaces with Python took seconds " , (b-a).total_seconds())
-        
-        self.viewer3DWidget.viewer.hideActor(1, delete = True)
-        
-        actors = self.viewer3DWidget.viewer.actors
-        
+
         self.viewer3DWidget.viewer.displayPolyData(trianglePolyData)
-        
-        if True:
-            # change the color of the polydata actors
-            named_colors = vtk.vtkNamedColors()
-            all_colors = named_colors.GetColorNames().split('\n')
+
+        actors = self.viewer3DWidget.viewer.actors
+
+        if self.surfaceColourCheck.isChecked():
+            # Change the colour of the polydata actors
+            named_colours = vtk.vtkNamedColors()
+            all_colours = named_colours.GetColorNames().split('\n')
+
             lut = vtk.vtkLookupTable()
             lut.SetNumberOfTableValues(surface)
             lut.Build()
+
             for i in range(surface):
-                R,G,B = named_colors.GetColor3d(all_colors[i])
+                R,G,B = named_colours.GetColor3d(all_colours[i])
                 lut.SetTableValue(i,R,G,B)
-            
+
+
             actors[1][0].GetMapper().SetLookupTable(lut)
-            actors[1][0].GetMapper().SetScalarRange(0,surface)
+            actors[1][0].GetMapper().SetScalarRange(0, surface)
             actors[1][0].GetMapper().SetScalarModeToUseCellFieldData()
             actors[1][0].GetMapper().SelectColorArray('SurfaceId')
             actors[1][0].GetMapper().Update()
-        else:
-            actors[1][0].GetProperty().SetColor(1,0,0) # red
-            
-        
 
-    def openFile(self):
-        fn = QtWidgets.QFileDialog.getOpenFileNames(self.mainwindow, 'Open File','../../../../../data')
+        self.viewer3DWidget.viewer.renWin.Render()
+
+    def updateProgressBar(self, value):
+        """
+        Set progress bar percentage.
+
+        :param (int) value:
+            Integer value between 0-100.
+        """
+
+        self.progressBar.setValue(value)
+
+    def completeProgressBar(self):
+        """
+        Set the progress bar to 100% complete and hide
+        """
+        self.progressBar.setValue(100)
+        self.progressBar.hide()
+
+    def showProgressBar(self):
+        """
+        Set the progress bar to 0% complete and show
+        """
+        self.progressBar.setValue(0)
+        self.progressBar.show()
+
+    def generateGraphTrigger(self):
+        """
+        Trigger method to allow threading of long running process
+        """
+
+        if self.graph_numpy_input_data is not None:
+            self.showProgressBar()
+
+            worker = Worker(self.generateGraph)
+            self.threadpool.start(worker)
+
+            # Progress bar signal handling
+            worker.signals.finished.connect(self.completeProgressBar)
+            worker.signals.progress.connect(self.updateProgressBar)
+
+        else:
+            msg = QtWidgets.QMessageBox(self.mainwindow)
+            msg.setIcon(QtWidgets.QMessageBox.Critical)
+            msg.setWindowTitle("NO DATA")
+            msg.setText("No data has been loaded into the reader. Please load a file to run the graph.")
+            msg.exec_()
+
+
+    def updateGraphTrigger(self):
+        """
+        Trigger method to allow threading of long running process
+        """
+
+        self.showProgressBar()
+
+        worker = Worker(self.updateGraph)
+        self.threadpool.start(worker)
+
+        # Progress bar signal handling
+        worker.signals.finished.connect(self.completeProgressBar)
+        worker.signals.progress.connect(self.updateProgressBar)
+
+    def openFileTrigger(self):
+        """
+        Trigger method to allow threading of long running process
+        """
+
+        self.showProgressBar()
+
+        self.fn = QtWidgets.QFileDialog.getOpenFileNames(self.mainwindow, 'Open File')
+
+        worker = Worker(self.openFile)
+        self.threadpool.start(worker)
+
+        # Progress bar signal handling
+        worker.signals.progress.connect(self.updateProgressBar)
+        worker.signals.finished.connect(self.completeProgressBar)
+        worker.signals.error.connect(self.displayFileErrorDialog)
+
+
+    def openFile(self, progress_callback=None, **kwargs):
+        """
+        Open file(s) based on results from QFileDialog
+
+        :param (function) progress_callback:
+            Callback funtion to emit progress percentage.
+        """
+
+        if 'filename' not in kwargs.keys():
+            fn = self.fn
+        else:
+            fn = ([kwargs['filename']],)
 
         # If the user has pressed cancel, the first element of the tuple will be empty.
         # Quit the method cleanly
@@ -572,35 +792,39 @@ class Ui_MainWindow(object):
         # Single file selection
         if len(fn[0]) == 1:
             file = fn[0][0]
-
+            if progress_callback:
+                progress_callback.emit(30)
             reader = vtk.vtkMetaImageReader()
             reader.AddObserver("ErrorEvent", self.e)
             reader.SetFileName(file)
             reader.Update()
+            if progress_callback:
+                progress_callback.emit(90)
 
         # Multiple TIFF files selected
         else:
             # Make sure that the files are sorted 0 - end
             filenames = natsorted(fn[0])
+            increment = 30.0 / len(filenames)
+
 
             # Basic test for tiff images
-            for file in filenames:
+            for n,file in enumerate(filenames,1):
                 ftype = imghdr.what(file)
                 if ftype != 'tiff':
                     # A non-TIFF file has been loaded, present error message and exit method
-                    self.e('','','When reading multiple files, all files must TIFF formatted.')
-                    file = file
-                    self.mainwindow.displayFileErrorDialog(file)
-                    return
+                    self.e('','','Problem reading file: {}'.format(file))
+                    raise ReadError("File read error!")
+                if progress_callback:
+                    progress_callback.emit(int(n * increment))
 
             # Have passed basic test, can attempt to load
-            # numpy_image = Converter.tiffStack2numpyEnforceBounds(filenames=filenames, bounds=(256,256,256))
-            numpy_image = Converter.pureTiff2Numpy(filenames=filenames, bounds=(256,246,256))
+            numpy_image = Converter.pureTiff2Numpy(filenames=filenames, bounds=(256,256,256), progress_callback=progress_callback)
             reader = Converter.numpy2vtkImporter(numpy_image)
             reader.Update()
 
         if self.e.ErrorOccurred():
-            self.mainwindow.displayFileErrorDialog(file)
+            raise ReadError()
 
         else:
             self.viewerWidget.viewer.setInput3DData(reader.GetOutput())
@@ -609,6 +833,21 @@ class Ui_MainWindow(object):
             self.mainwindow.setStatusTip('Ready')
             self.spacing = reader.GetOutput().GetSpacing()
             self.origin = reader.GetOutput().GetOrigin()
+
+            ### After successfully opening file, reset the interface ###
+            # Reset linked state
+            self.linkViewers(force_linked=True)
+
+            # Reset graph if drawn
+            self.graphWidget.viewer.update(vtk.vtkMutableDirectedGraph())
+
+            # Reset graph parameter panel
+            if self.hasDockableWindow:
+                for element in self.treeWidgetInitialElements:
+                    element.setEnabled(True)
+
+                for element in self.treeWidgetUpdateElements:
+                    element.setEnabled(False)
 
     def saveFile(self):
         dialog = QtWidgets.QFileDialog(self.mainwindow)
@@ -623,95 +862,36 @@ class Ui_MainWindow(object):
     def close(self):
         QtWidgets.qApp.quit()
 
-    def displayFileErrorDialog(self, file):
+    def displayFileErrorDialog(self, tuple):
+        exception_type, exception_object, traceback = tuple
+
         msg = QtWidgets.QMessageBox(self.mainwindow)
         msg.setIcon(QtWidgets.QMessageBox.Critical)
         msg.setWindowTitle("READ ERROR")
-        msg.setText("Error reading file: ({filename})".format(filename=file))
+        msg.setText(repr(exception_object))
         msg.setDetailedText(self.e.ErrorMessage())
         msg.exec_()
 
 
-class WorkerSignals(QtCore.QObject):
-    '''
-    Defines the signals available from a running worker thread.
-
-    Supported signals are:
-
-    finished
-        No data
-
-    error
-        `tuple` (exctype, value, traceback.format_exc() )
-
-    result
-        `object` data returned from processing, anything
-
-    progress
-        `int` indicating % progress
-
-    '''
-    finished = pyqtSignal()
-    error = pyqtSignal(tuple)
-    result = pyqtSignal(object)
-    progress = pyqtSignal(int)
-
-
-class Worker(QtCore.QRunnable):
-    '''
-    Worker thread
-
-    Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
-
-    :param callback: The function callback to run on this worker thread. Supplied args and 
-                     kwargs will be passed through to the runner.
-    :type callback: function
-    :param args: Arguments to pass to the callback function
-    :param kwargs: Keywords to pass to the callback function
-
-    '''
-
-    def __init__(self, fn, *args, **kwargs):
-        super(Worker, self).__init__()
-
-        # Store constructor arguments (re-used for processing)
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
-        self.signals = WorkerSignals()
-
-        # Add the callback to our kwargs
-        self.kwargs['progress_callback'] = self.signals.progress
-
-    @pyqtSlot()
-    def run(self):
-        '''
-        Initialise the runner function with passed args, kwargs.
-        '''
-
-        # Retrieve args/kwargs here; and fire processing using them
-        try:
-            result = self.fn(*self.args, **self.kwargs)
-        except:
-            traceback.print_exc()
-            exctype, value = sys.exc_info()[:2]
-            self.signals.error.emit((exctype, value, traceback.format_exc()))
-        else:
-            self.signals.result.emit(result)  # Return the result of the processing
-        finally:
-            self.signals.finished.emit()  # Done
-
-
-
-
-
 def main():
     import sys
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Data viewer")
+    parser.add_argument('--dev', dest='development', help='Specify file to open')
+    args= parser.parse_args()
+    print (args.development)
+
     app = QtWidgets.QApplication(sys.argv)
     MainWindow = QtWidgets.QMainWindow()
     ui = Ui_MainWindow()
     ui.setupUi(MainWindow)
     MainWindow.show()
+    if args.development:
+        ui.openFile(filename=args.development)
+        ui.createDockableWindow()
+        ui.generateGraphTrigger()
+
     sys.exit(app.exec_())
 
 if __name__ == "__main__":
