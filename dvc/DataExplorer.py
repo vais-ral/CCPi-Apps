@@ -4,9 +4,6 @@ from PyQt5.QtWidgets import *
 import vtk
 from ccpi.viewer.QVTKCILViewer import QVTKCILViewer
 from ccpi.viewer.CILViewer2D import Converter
-from ccpi.viewer.CILViewer2D import SLICE_ORIENTATION_XY
-from ccpi.viewer.CILViewer2D import SLICE_ORIENTATION_YZ
-from ccpi.viewer.CILViewer2D import SLICE_ORIENTATION_XZ
 from natsort import natsorted
 import imghdr
 import os
@@ -232,45 +229,17 @@ class Window(QMainWindow):
                 #2. Add the points to a vtkPolyData.
                 self.pointPolyData.SetPoints( self.vtkPointCloud ) 
                 self.pointPolyData.SetVerts( vertices ) 
-                
-                # should attach the plane to the onslice event
-                self.plane = vtk.vtkPlane()
-                self.clipper = vtk.vtkClipPolyData()
-                self.clipper.SetInputData(self.pointPolyData)
-                self.clipper.SetClipFunction(self.plane)
-                self.clipper.InsideOutOn()
-                
                 mapper = vtk.vtkPolyDataMapper()
-                mapper.SetInputConnection(self.clipper.GetOutputPort())
+                mapper.SetInputData(self.pointPolyData)
                 actor = vtk.vtkActor()
                 actor.SetMapper(mapper)
                 actor.GetProperty().SetPointSize(3)
                 actor.GetProperty().SetColor(0,1,1)
-                #actor.VisibilityOff()
-                
-
-                
                 self.vtkWidget.viewer.getRenderer().AddActor(actor)
                 print ("currently present actors" , 
                        self.vtkWidget.viewer.getRenderer().GetActors().GetNumberOfItems())
-
-                self.myCallback(self.plane,"MouseWheelForwardEvent")
-                self.plane.AddObserver("MouseWheelForwardEvent", self.myCallback)
-                self.plane.AddObserver("MouseWheelBackwardEvent", self.myCallback)
-
                 
-    def myCallback(self,obj,event):
-        active_slice = self.vtkWidget.viewer.GetActiveSlice()
-        orientation = self.vtkWidget.viewer.GetSliceOrientation()
-        normal = [0,0,0]
-        origin = [0,0,0]
-        origin[orientation] = active_slice
-        normal[orientation] = 1    
-        obj.SetOrigin(origin[0],origin[1],origin[2])
-        obj.SetNormal(normal[0],normal[1],normal[2])
-        print (obj)
-        print (normal, origin)
-        
+                
 
 def main():
     err = vtk.vtkFileOutputWindow()
