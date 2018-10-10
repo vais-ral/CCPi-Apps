@@ -4,6 +4,9 @@ from PyQt5.QtWidgets import *
 import vtk
 from ccpi.viewer.QVTKCILViewer import QVTKCILViewer
 from ccpi.viewer.CILViewer2D import Converter
+from ccpi.viewer.CILViewer2D import SLICE_ORIENTATION_XY
+from ccpi.viewer.CILViewer2D import SLICE_ORIENTATION_XZ
+from ccpi.viewer.CILViewer2D import SLICE_ORIENTATION_YZ
 from natsort import natsorted
 import imghdr
 import os
@@ -74,7 +77,18 @@ class Window(QMainWindow):
 
         self.frame.setLayout(self.vl)
         self.setCentralWidget(self.frame)
-
+        
+        # init some viewer stuff
+        self.vtkPointCloud = vtk.vtkPoints()
+        self.pointActor = vtk.vtkActor()
+        self.selectActor = vtk.vtkLODActor()
+        self.pointPolyData = vtk.vtkPolyData()
+        self.visPlane = vtk.vtkPlane()
+        self.planeClipper = vtk.vtkClipPolyData()
+        self.vtkWidget.viewer.style.AddObserver("MouseWheelForwardEvent", 
+                                                self.updateClippingPlane, 0.9)
+        self.vtkWidget.viewer.style.AddObserver("MouseWheelBackwardEvent", 
+                                                self.updateClippingPlane, 0.9)
         self.toolbar()
 
         self.statusBar()
@@ -97,10 +111,6 @@ class Window(QMainWindow):
         # Add actions to toolbar
         self.toolbar.addAction(openAction)
         self.toolbar.addAction(saveAction)
-        
-        self.vtkPointCloud = vtk.vtkPoints()
-        self.pointActor = vtk.vtkActor()
-        self.pointPolyData = vtk.vtkPolyData()
         
         
 
@@ -235,12 +245,60 @@ class Window(QMainWindow):
                 actor.SetMapper(mapper)
                 actor.GetProperty().SetPointSize(3)
                 actor.GetProperty().SetColor(0,1,1)
+                self.pointActor = actor
+                actor.VisibilityOn()
+                
+                #plane = vtk.vtkPlane()
+                plane = self.visPlane
+                point = self.vtkPointCloud
+                clipper = self.planeClipper
+                plane.SetOrigin(0,1.,0)
+                plane.SetNormal(0,1,0)
+                
+                
+                #clipper.SetInputConnection(apd.GetOutputPort())
+                clipper.SetInputData(self.pointPolyData)
+                clipper.SetClipFunction(plane)
+                clipper.InsideOutOn()
+                
+                selectMapper = vtk.vtkPolyDataMapper()
+                selectMapper.SetInputConnection(clipper.GetOutputPort())
+                
+                selectActor = self.selectActor
+                #selectActor = vtk.vtkLODActor()
+                selectActor.SetMapper(selectMapper)
+                selectActor.GetProperty().SetColor(0, 1, 0)
+                selectActor.VisibilityOn()
+                selectActor.SetScale(1.01, 1.01, 1.01)
+                selectActor.GetProperty().SetPointSize(20)
+
+                
                 self.vtkWidget.viewer.getRenderer().AddActor(actor)
+                self.vtkWidget.viewer.getRenderer().AddActor(selectActor)
                 print ("currently present actors" , 
                        self.vtkWidget.viewer.getRenderer().GetActors().GetNumberOfItems())
                 
                 
-
+    def updateClippingPlane(self, obj, event):
+        print ("caught updateClippingPlane!", event)
+        normal = [0,0,0]
+        origin = [0,0,0]
+        orientation = self.vtkWidget.viewer.GetSliceOrientation()
+        norm = 1
+        if orientation == SLICE_ORIENTATION_XY:
+            norm = 1
+        elif orientation == SLICE_ORIENTATION_XZ:
+            norm = -1
+        elif orientation == SLICE_ORIENTATION_YZ:
+            norm = 1
+        normal[orientation] = norm
+        origin[orientation] = self.vtkWidget.viewer.GetActiveSlice() + 0.1 * norm
+        print ("normal" , normal)
+        print ("origin" , origin)
+        plane = self.visPlane
+        plane.SetOrigin(origin[0],origin[1],origin[2])
+        plane.SetNormal(normal[0],normal[1],normal[2])
+        
 def main():
     err = vtk.vtkFileOutputWindow()
     err.SetFileName("viewer.log")
