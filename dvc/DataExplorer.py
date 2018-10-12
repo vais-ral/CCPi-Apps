@@ -88,7 +88,7 @@ class Window(QMainWindow):
         self.vtkWidget.viewer.style.AddObserver("MouseWheelForwardEvent", 
                                                 self.updateClippingPlane, 0.9)
         self.vtkWidget.viewer.style.AddObserver("MouseWheelBackwardEvent", 
-                                                self.updateClippingPlane, 0.9)
+                                               self.updateClippingPlane, 0.9)
         self.toolbar()
 
         self.statusBar()
@@ -246,7 +246,7 @@ class Window(QMainWindow):
                 actor.GetProperty().SetPointSize(3)
                 actor.GetProperty().SetColor(0,1,1)
                 self.pointActor = actor
-                actor.VisibilityOn()
+                actor.VisibilityOff()
                 
                 #plane = vtk.vtkPlane()
                 plane = self.visPlane
@@ -269,8 +269,8 @@ class Window(QMainWindow):
                 selectActor.SetMapper(selectMapper)
                 selectActor.GetProperty().SetColor(0, 1, 0)
                 selectActor.VisibilityOn()
-                selectActor.SetScale(1.01, 1.01, 1.01)
-                selectActor.GetProperty().SetPointSize(20)
+                #selectActor.SetScale(1.01, 1.01, 1.01)
+                selectActor.GetProperty().SetPointSize(3)
 
                 
                 self.vtkWidget.viewer.getRenderer().AddActor(actor)
@@ -291,13 +291,20 @@ class Window(QMainWindow):
             norm = -1
         elif orientation == SLICE_ORIENTATION_YZ:
             norm = 1
+        beta = 0
+        if event == "MouseWheelForwardEvent":
+            # this is pretty absurd but it seems the 
+            # plane cuts too much in Forward...
+            beta = +2
+            
         normal[orientation] = norm
-        origin[orientation] = self.vtkWidget.viewer.GetActiveSlice() + 0.1 * norm
+        origin[orientation] = self.vtkWidget.viewer.GetActiveSlice() + beta 
         print ("normal" , normal)
         print ("origin" , origin)
-        plane = self.visPlane
-        plane.SetOrigin(origin[0],origin[1],origin[2])
-        plane.SetNormal(normal[0],normal[1],normal[2])
+        print ("<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>")
+        
+        self.visPlane.SetOrigin(origin[0],origin[1],origin[2])
+        self.visPlane.SetNormal(normal[0],normal[1],normal[2])
         
 def main():
     err = vtk.vtkFileOutputWindow()
