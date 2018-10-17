@@ -1,6 +1,18 @@
 import sys
-from PyQt5 import QtGui, QtCore
-from PyQt5.QtWidgets import *
+from PyQt5 import QtCore
+#from PyQt5 import QtGui
+#from PyQt5.QtWidgets import *
+from PyQt5.QtWidgets import QMainWindow
+from PyQt5.QtWidgets import QAction
+from PyQt5.QtWidgets import QDockWidget
+from PyQt5.QtWidgets import QFrame
+from PyQt5.QtWidgets import QVBoxLayout
+from PyQt5.QtWidgets import QFileDialog
+from PyQt5.QtWidgets import QStyle
+from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QTableWidget
+from PyQt5.QtWidgets import QTableWidgetItem
 import vtk
 from ccpi.viewer.QVTKCILViewer import QVTKCILViewer
 from ccpi.viewer.CILViewer2D import Converter
@@ -63,11 +75,16 @@ class Window(QMainWindow):
         closeAction = QAction("Close", self)
         closeAction.setShortcut("Ctrl+Q")
         closeAction.triggered.connect(self.close)
+        
+        tableAction = QAction("Edit Point Cloud", self)
+        tableAction.setShortcut("Ctrl+T")
+        tableAction.triggered.connect(self.editPointCloud)
 
         mainMenu = self.menuBar()
         fileMenu = mainMenu.addMenu('File')
         fileMenu.addAction(openAction)
         fileMenu.addAction(closeAction)
+        fileMenu.addAction(tableAction)
 
         self.frame = QFrame()
         self.vl = QVBoxLayout()
@@ -91,9 +108,13 @@ class Window(QMainWindow):
                                                self.updateClippingPlane, 0.9)
         self.toolbar()
 
+        self.createTableWidget()
+        
         self.statusBar()
         self.setStatusTip('Open file to begin visualisation...')
-
+        
+        self.subvol = 80
+        
         self.show()
 
     def toolbar(self):
@@ -201,13 +222,13 @@ class Window(QMainWindow):
 
 
     def close(self):
-        qApp.quit()
+        self.quit()
         
     def loadPointCloudFromCSV(self, filename):
         print ("loadPointCloudFromCSV")
         with open(filename, 'r') as csvfile:
             read = csv.reader(csvfile)
-            i = 0
+            
             for row in read:
                 #read in only numerical values
                 print (row)
@@ -222,6 +243,10 @@ class Window(QMainWindow):
                     print (ve)
                     
             print (self.pointcloud)
+            
+            # load data in the QTableWidget
+            self.loadIntoTableWidget(self.pointcloud)
+            
             # render the point cloud
             if len(self.pointcloud) > 0:
                 #1. Load all of the point coordinates into a vtkPoints.
@@ -248,16 +273,42 @@ class Window(QMainWindow):
                 self.pointActor = actor
                 actor.VisibilityOff()
                 
+                # subvolume 
+                # arrow
+                subv_glyph = vtk.vtkGlyph3D()
+                subv_glyph.SetScaleFactor(1.)
+                #arrow_glyph.SetColorModeToColorByVector()
+                sphere_source = vtk.vtkSphereSource()
+                sphere_source.SetRadius(self.subvol)
+                sphere_source.SetThetaResolution(12)
+                sphere_source.SetPhiResolution(12)
+                sphere_mapper = vtk.vtkPolyDataMapper()
+                sphere_mapper.SetInputConnection(subv_glyph.GetOutputPort())
+                
+                
+                subv_glyph.SetInputData(self.pointPolyData)
+                subv_glyph.SetSourceConnection(sphere_source.GetOutputPort())
+                
+                
+                # Usual actor
+                sphere_actor = vtk.vtkActor()
+                sphere_actor.SetMapper(sphere_mapper)
+                sphere_actor.GetProperty().SetColor(1, 0, 0)
+                sphere_actor.GetProperty().SetOpacity(0.2)
+                
+                
+                
+                ## clipping plane
                 #plane = vtk.vtkPlane()
                 plane = self.visPlane
-                point = self.vtkPointCloud
+                #point = self.vtkPointCloud
                 clipper = self.planeClipper
                 plane.SetOrigin(0,1.,0)
                 plane.SetNormal(0,1,0)
                 
                 
-                #clipper.SetInputConnection(apd.GetOutputPort())
-                clipper.SetInputData(self.pointPolyData)
+                clipper.SetInputConnection(subv_glyph.GetOutputPort())
+                #clipper.SetInputData(self.pointPolyData)
                 clipper.SetClipFunction(plane)
                 clipper.InsideOutOn()
                 
@@ -275,6 +326,7 @@ class Window(QMainWindow):
                 
                 self.vtkWidget.viewer.getRenderer().AddActor(actor)
                 self.vtkWidget.viewer.getRenderer().AddActor(selectActor)
+                #self.vtkWidget.viewer.getRenderer().AddActor(sphere_actor)
                 print ("currently present actors" , 
                        self.vtkWidget.viewer.getRenderer().GetActors().GetNumberOfItems())
                 
@@ -305,6 +357,30 @@ class Window(QMainWindow):
         
         self.visPlane.SetOrigin(origin[0],origin[1],origin[2])
         self.visPlane.SetNormal(normal[0],normal[1],normal[2])
+    def setSubvolSize(self, subvolume):
+        self.subvol = subvolume
+        
+    def editPointCloud(self):
+        self.tableDock.show()
+    
+    def createTableWidget(self):
+        self.tableDock = QDockWidget(self)
+        self.tableWidget = QTableWidget()
+        self.tableDock.setMinimumWidth(300)
+        self.tableDock.setWidget(self.tableWidget)
+        self.tableDock.setWindowTitle("Edit Point Cloud")
+
+        self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, self.tableDock)
+        self.tableDock.hide()
+        
+    def loadIntoTableWidget(self, data):
+        if len(data) <= 0:
+            return
+        self.tableWidget.setRowCount(len(data))
+        self.tableWidget.setColumnCount(len(data[0]))
+        for i,v in enumerate(data):
+            for j,w in enumerate(v):
+                self.tableWidget.setItem(i,j, QTableWidgetItem(str(w)))
         
 def main():
     err = vtk.vtkFileOutputWindow()
@@ -313,6 +389,8 @@ def main():
     
     App = QApplication(sys.argv)
     gui = Window()
+    if len(sys.argv) > 1:
+        gui.setSubvolSize(float(sys.argv[1]))
     sys.exit(App.exec())
 
 if __name__=="__main__":
