@@ -13,6 +13,7 @@ import os
 import numpy
 import csv
 import json
+from functools import reduce
 
 def loadPointCloudFromCSV(filename, delimiter=','):
     print ("loadPointCloudFromCSV")
@@ -66,8 +67,10 @@ for count in range(len(displ)):
                            displ[count][3])
     vertices.InsertNextCell(1)
     vertices.InsertCellPoint(p)
-    arrow.InsertNextTuple3(displ[count][6],displ[count][7],displ[count][8])
-    acolor.InsertNextValue(numpy.sqrt(displ[count][6]**2+displ[count][7]**2+displ[count][8]**2))
+    #arrow.InsertNextTuple3(displ[count][6],displ[count][7],displ[count][8])
+    arrow.InsertNextTuple3(displ[count][6],displ[count][7],0)
+    acolor.InsertNextValue(reduce(lambda x,y: x + y**2, (*displ[count][6:8],0), 0))
+    #(displ[count][6]**2+displ[count][7]**2+displ[count][8]**2))
     
 lut = vtk.vtkLookupTable()
 print ("lut table range" , acolor.GetRange())
@@ -99,10 +102,6 @@ arrow_mapper.SelectColorArray(0)
 arrow_mapper.SetScalarRange(acolor.GetRange())
 arrow_mapper.SetLookupTable(lut)
 
-
-arrow_actor = vtk.vtkActor()
-arrow_actor.SetMapper(arrow_mapper)
-
 arrow_glyph.SetInputData(pointPolyData)
 arrow_glyph.SetSourceConnection(arrow_source.GetOutputPort())
 #arrow_glyph.SetScaleFactor(5)
@@ -110,11 +109,11 @@ arrow_glyph.SetScaleModeToScaleByVector()
 arrow_glyph.SetVectorModeToUseVector()
 arrow_glyph.ScalingOn()
 arrow_glyph.OrientOn()
-#arrow_actor.GetProperty().SetColor(0, 1, 1)
 
 # Usual actor
 arrow_actor = vtk.vtkActor()
 arrow_actor.SetMapper(arrow_mapper)
+#arrow_actor.GetProperty().SetColor(0, 1, 1)
 
 # vtk user guide p.95
 conesource = vtk.vtkConeSource()
@@ -153,7 +152,7 @@ v.ren.AddActor(arrow_actor)
 
 
 ## add volume
-if False:
+if True:
     runconfig = json.load(open("dvc_kalpani.json", "r"))
     dataset = numpy.load(os.path.abspath(runconfig['correlate_filename']))
     conv = Converter.numpy2vtkImporter(numpy.transpose(dataset, [0,1,2]))
