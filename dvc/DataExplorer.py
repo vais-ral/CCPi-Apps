@@ -110,6 +110,7 @@ class Window(QMainWindow):
                                                 self.updateClippingPlane, 0.9)
         self.vtkWidget.viewer.style.AddObserver('LeftButtonReleaseEvent',
                                                 self.OnLeftButtonReleaseEvent, 0.5)
+        
         self.toolbar()
 
         self.createTableWidget()
@@ -252,24 +253,27 @@ class Window(QMainWindow):
             self.renderPointCloud()
 
     def renderPointCloud(self):
+        if len(self.pointcloud) > 0:
+            # 1. Load all of the point coordinates into a vtkPoints.
+            # Create the topology of the point (a vertex)
+
+            vertices = self.vertices
+            spacing = self.vtkWidget.viewer.img3D.GetSpacing()
+            origin  = self.vtkWidget.viewer.img3D.GetOrigin()
+            for count in range(len(self.pointcloud)):
+                p = self.vtkPointCloud.InsertNextPoint(self.pointcloud[count][1] * spacing[0] - origin[0],
+                                                       self.pointcloud[count][2] * spacing[1] - origin[1],
+                                                       self.pointcloud[count][3] * spacing[2] - origin[2])
+                vertices.InsertNextCell(1)
+                vertices.InsertCellPoint(p)
+
+            # 2. Add the points to a vtkPolyData.
+            self.pointPolyData.SetPoints(self.vtkPointCloud)
+            self.pointPolyData.SetVerts(vertices)
+    
         if not self.pointActorsAdded:
             # render the point cloud
-            if len(self.pointcloud) > 0:
-                # 1. Load all of the point coordinates into a vtkPoints.
-                # Create the topology of the point (a vertex)
-
-                vertices = self.vertices
-
-                for count in range(len(self.pointcloud)):
-                    p = self.vtkPointCloud.InsertNextPoint(self.pointcloud[count][1],
-                                                           self.pointcloud[count][2],
-                                                           self.pointcloud[count][3])
-                    vertices.InsertNextCell(1)
-                    vertices.InsertCellPoint(p)
-
-                # 2. Add the points to a vtkPolyData.
-                self.pointPolyData.SetPoints(self.vtkPointCloud)
-                self.pointPolyData.SetVerts(vertices)
+            
 
                 # clipping plane
                 #plane = vtk.vtkPlane()
@@ -298,7 +302,9 @@ class Window(QMainWindow):
                     subv_glyph.SetScaleFactor(1.)
                     # arrow_glyph.SetColorModeToColorByVector()
                     sphere_source = vtk.vtkSphereSource()
-                    sphere_source.SetRadius(self.subvol)
+                    spacing = self.vtkWidget.viewer.img3D.GetSpacing()
+                    radius = self.subvol / max(spacing)
+                    sphere_source.SetRadius(radius)
                     sphere_source.SetThetaResolution(12)
                     sphere_source.SetPhiResolution(12)
                     sphere_mapper = vtk.vtkPolyDataMapper()
@@ -425,7 +431,7 @@ class Window(QMainWindow):
 
             position = interactor.GetEventPosition()
 
-            vox = self.vtkWidget.viewer.style.display2imageCoordinate(position)
+            vox = self.vtkWidget.viewer.style.display2imageCoordinate(position, subvoxel=True)
             print("[%d,%d,%d] : %.2g" % vox)
             rows = self.tableWidget.rowCount()
             cols = self.tableWidget.columnCount()
@@ -453,6 +459,7 @@ class Window(QMainWindow):
                 self.renderPointCloud()
             else:
                 self.appendPointToCloud([el+1, vox[0], vox[1], vox[2]])
+                self.renderPointCloud()
 
     def appendPointToCloud(self, point):
         self.pointcloud.append(point)
