@@ -95,14 +95,9 @@ class Window(QMainWindow):
         self.setCentralWidget(self.frame)
 
         # init some viewer stuff
-        self.vtkPointCloud = vtk.vtkPoints()
-        self.pointActor = vtk.vtkActor()
-        self.selectActor = vtk.vtkLODActor()
-        self.vertices = vtk.vtkCellArray()
-        self.pointActorsAdded = False
-        self.pointPolyData = vtk.vtkPolyData()
-        self.visPlane = vtk.vtkPlane()
-        self.planeClipper = vtk.vtkClipPolyData()
+        self.pointActorsAdded = self.setupPointCloudPipeline()
+               
+        
         # add observer to viewer events
         self.vtkWidget.viewer.style.AddObserver("MouseWheelForwardEvent",
                                                 self.updateClippingPlane, 0.9)
@@ -121,8 +116,30 @@ class Window(QMainWindow):
         self.subvol = 80
         self.displaySpheres = True
 
+        self.pointcloud = []
+        
         self.show()
-
+        
+    def setupPointCloudPipeline(self):
+        self.vtkPointCloud = vtk.vtkPoints()
+        self.pointActor = vtk.vtkActor()
+        self.vertexActor = vtk.vtkActor()
+        self.selectActor = vtk.vtkLODActor()
+        self.vertices = vtk.vtkCellArray()
+        self.pointActorsAdded = False
+        self.pointPolyData = vtk.vtkPolyData()
+        self.visPlane = [ vtk.vtkPlane() , vtk.vtkPlane() ] 
+        self.planeClipper =  [ vtk.vtkClipPolyData() , vtk.vtkClipPolyData() ]
+        
+        self.pointMapper = vtk.vtkPolyDataMapper()
+        
+        self.glyph3D = vtk.vtkGlyph3D()
+        self.sphereMapper = vtk.vtkPolyDataMapper()
+        self.sphereActor = vtk.vtkActor()
+        
+        self.selectMapper = vtk.vtkPolyDataMapper()
+        return False
+        
     def toolbar(self):
         # Initialise the toolbar
         self.toolbar = self.addToolBar('Viewer tools')
@@ -141,15 +158,17 @@ class Window(QMainWindow):
         self.toolbar.addAction(openAction)
         self.toolbar.addAction(saveAction)
 
+        
     def openFile(self):
-        self.pointcloud = []
         fn = QFileDialog.getOpenFileNames(self, 'Open File')
 
         # If the user has pressed cancel, the first element of the tuple will be empty.
         # Quit the method cleanly
         if not fn[0]:
             return
-
+        self.openFileByPath(fn)
+        
+    def openFileByPath(self, fn):
         # Single file selection
         if len(fn[0]) == 1:
             file = fn[0][0]
@@ -162,6 +181,7 @@ class Window(QMainWindow):
                     reader.SetFileName(file)
                     reader.Update()
                 elif file.split(".")[1] == 'csv':
+                    self.pointcloud = []
                     self.loadPointCloudFromCSV(file)
                     return
             else:
@@ -252,6 +272,26 @@ class Window(QMainWindow):
             self.loadIntoTableWidget(self.pointcloud)
             self.renderPointCloud()
 
+    def addToPointCloud(self, pointcloud):
+        if len(pointcloud) > 0:
+            # 1. Load all of the point coordinates into a vtkPoints.
+            # Create the topology of the point (a vertex)
+
+            vertices = self.vertices
+            spacing = self.vtkWidget.viewer.img3D.GetSpacing()
+            origin  = self.vtkWidget.viewer.img3D.GetOrigin()
+            for count in range(len(pointcloud)):
+                p = self.vtkPointCloud.InsertNextPoint(pointcloud[count][1] * spacing[0] - origin[0],
+                                                       pointcloud[count][2] * spacing[1] - origin[1],
+                                                       pointcloud[count][3] * spacing[2] - origin[2])
+                vertices.InsertNextCell(1)
+                vertices.InsertCellPoint(p)
+            self.vtkPointCloud.Modified()
+            vertices.Modified()
+            # 2. Add the points to a vtkPolyData.
+            self.pointPolyData.SetPoints(self.vtkPointCloud)
+            self.pointPolyData.SetVerts(vertices)
+    
     def renderPointCloud(self):
         if len(self.pointcloud) > 0:
             # 1. Load all of the point coordinates into a vtkPoints.
@@ -277,17 +317,20 @@ class Window(QMainWindow):
 
                 # clipping plane
                 #plane = vtk.vtkPlane()
-                plane = self.visPlane
+                plane = self.visPlane[0]
+                plane2 = self.visPlane[1]
                 #point = self.vtkPointCloud
-                clipper = self.planeClipper
+                clipper = self.planeClipper[0]
+                clipper2 = self.planeClipper[1]
                 plane.SetOrigin(0, 1., 0)
                 plane.SetNormal(0, 1, 0)
 
                 if not self.displaySpheres:
 
-                    mapper = vtk.vtkPolyDataMapper()
+                    #mapper = vtk.vtkPolyDataMapper()
+                    mapper = self.pointMapper
                     mapper.SetInputData(self.pointPolyData)
-                    actor = vtk.vtkActor()
+                    actor = self.vertexActor
                     actor.SetMapper(mapper)
                     actor.GetProperty().SetPointSize(3)
                     actor.GetProperty().SetColor(0, 1, 1)
@@ -298,7 +341,7 @@ class Window(QMainWindow):
                 else:
                     # subvolume
                     # arrow
-                    subv_glyph = vtk.vtkGlyph3D()
+                    subv_glyph = self.glyph3D
                     subv_glyph.SetScaleFactor(1.)
                     # arrow_glyph.SetColorModeToColorByVector()
                     sphere_source = vtk.vtkSphereSource()
@@ -307,7 +350,7 @@ class Window(QMainWindow):
                     sphere_source.SetRadius(radius)
                     sphere_source.SetThetaResolution(12)
                     sphere_source.SetPhiResolution(12)
-                    sphere_mapper = vtk.vtkPolyDataMapper()
+                    sphere_mapper = self.sphereMapper
                     sphere_mapper.SetInputConnection(
                         subv_glyph.GetOutputPort())
 
@@ -316,7 +359,7 @@ class Window(QMainWindow):
                         sphere_source.GetOutputPort())
 
                     # Usual actor
-                    sphere_actor = vtk.vtkActor()
+                    sphere_actor = self.sphereActor
                     sphere_actor.SetMapper(sphere_mapper)
                     sphere_actor.GetProperty().SetColor(1, 0, 0)
                     sphere_actor.GetProperty().SetOpacity(0.2)
@@ -325,9 +368,12 @@ class Window(QMainWindow):
                 #
                 clipper.SetClipFunction(plane)
                 clipper.InsideOutOn()
+                clipper2.SetClipFunction(plane2)
+                clipper2.InsideOutOn()
+                #clipper2.SetInputConnection(clipper.GetOutputPort())
 
-                selectMapper = vtk.vtkPolyDataMapper()
-                selectMapper.SetInputConnection(clipper.GetOutputPort())
+                selectMapper = self.selectMapper
+                selectMapper.SetInputConnection(clipper2.GetOutputPort())
 
                 selectActor = self.selectActor
                 #selectActor = vtk.vtkLODActor()
@@ -350,19 +396,21 @@ class Window(QMainWindow):
         print("caught updateClippingPlane!", event)
         normal = [0, 0, 0]
         origin = [0, 0, 0]
-        orientation = self.vtkWidget.viewer.GetSliceOrientation()
         norm = 1
+        orientation = self.vtkWidget.viewer.GetSliceOrientation()
         if orientation == SLICE_ORIENTATION_XY:
             norm = 1
         elif orientation == SLICE_ORIENTATION_XZ:
             norm = -1
         elif orientation == SLICE_ORIENTATION_YZ:
             norm = 1
-        beta = 0
-        if event == "MouseWheelForwardEvent":
+        beta = 1
+        if event == "MouseWheelForwardEvent" and False:
             # this is pretty absurd but it seems the
             # plane cuts too much in Forward...
-            beta = +2
+            offset = self.vtkWidget.viewer.img3D.GetSpacing()[orientation] -.1
+            print ("offset" , offset)
+            beta += offset
 
         normal[orientation] = norm
         origin[orientation] = self.vtkWidget.viewer.GetActiveSlice() + beta
@@ -370,9 +418,12 @@ class Window(QMainWindow):
         print("origin", origin)
         print("<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>")
 
-        self.visPlane.SetOrigin(origin[0], origin[1], origin[2])
-        self.visPlane.SetNormal(normal[0], normal[1], normal[2])
-
+        self.visPlane[0].SetOrigin(origin[0], origin[1], origin[2])
+        self.visPlane[0].SetNormal(normal[0], normal[1], normal[2])
+        origin[orientation] = self.vtkWidget.viewer.GetActiveSlice() -1
+        self.visPlane[1].SetOrigin(origin[0], origin[1], origin[2])
+        
+        self.visPlane[1].SetNormal(normal[0], normal[1], normal[2])
     def setSubvolSize(self, subvolume):
         self.subvol = subvolume
 
@@ -459,17 +510,13 @@ class Window(QMainWindow):
                 self.renderPointCloud()
             else:
                 self.appendPointToCloud([el+1, vox[0], vox[1], vox[2]])
-                self.renderPointCloud()
+                #self.renderPointCloud()
 
     def appendPointToCloud(self, point):
         self.pointcloud.append(point)
-        print(self.pointcloud)
-        p = self.vtkPointCloud.InsertNextPoint(self.pointcloud[-1][1],
-                                               self.pointcloud[-1][2],
-                                               self.pointcloud[-1][3])
-        self.vertices.InsertNextCell(1)
-        self.vertices.InsertCellPoint(p)
-
+        self.pointActorsAdded = self.setupPointCloudPipeline()
+        self.renderPointCloud()
+        
 
 def main():
     err = vtk.vtkFileOutputWindow()
@@ -481,6 +528,11 @@ def main():
     if len(sys.argv) > 1:
         gui.setSubvolSize(float(sys.argv[1]))
         gui.dislayPointCloudAsSpheres(False)
+    if len(sys.argv) > 2:
+        fname = os.path.abspath(sys.argv[2])
+        print ("open " , fname)
+        gui.openFileByPath(( (fname , ),))
+        
     sys.exit(App.exec())
 
 
