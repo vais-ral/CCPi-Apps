@@ -1,3 +1,19 @@
+"""
+DataExplorer
+
+UI to configure a DVC run
+
+Usage:
+ DataExplorer.py [ -h ] [ --imagedata=<path> ] [ --spheres=0 ] [ --subvol=10 ]
+
+Options:
+ --imagedata=path      input filename
+ --spheres=n        whether to show spheres
+ --subvol=n         the max size of the subvolume in voxel
+ -h       display help
+ 
+"""
+
 import sys
 from PyQt5 import QtCore
 #from PyQt5 import QtGui
@@ -25,7 +41,7 @@ import os
 import csv
 from functools import reduce
 from numbers import Number
-
+from docopt import docopt
 
 class ErrorObserver:
 
@@ -373,7 +389,7 @@ class Window(QMainWindow):
                 #clipper2.SetInputConnection(clipper.GetOutputPort())
 
                 selectMapper = self.selectMapper
-                selectMapper.SetInputConnection(clipper2.GetOutputPort())
+                selectMapper.SetInputConnection(clipper.GetOutputPort())
 
                 selectActor = self.selectActor
                 #selectActor = vtk.vtkLODActor()
@@ -404,11 +420,12 @@ class Window(QMainWindow):
             norm = -1
         elif orientation == SLICE_ORIENTATION_YZ:
             norm = 1
-        beta = 1
+        beta = 0
         if event == "MouseWheelForwardEvent" and False:
             # this is pretty absurd but it seems the
             # plane cuts too much in Forward...
             offset = self.vtkWidget.viewer.img3D.GetSpacing()[orientation] -.1
+            offset = 2
             print ("offset" , offset)
             beta += offset
 
@@ -522,19 +539,36 @@ def main():
     err = vtk.vtkFileOutputWindow()
     err.SetFileName("viewer.log")
     vtk.vtkOutputWindow.SetInstance(err)
-
+    
+    __version__ = '0.1.0'
+    print ("Starting ... ")
+    args = docopt(__doc__, version=__version__)
+    print ("Parsing args")
+    print ("Passed args " , args)
+    
     App = QApplication(sys.argv)
     gui = Window()
-    if len(sys.argv) > 1:
-        gui.setSubvolSize(float(sys.argv[1]))
-        gui.dislayPointCloudAsSpheres(False)
-    if len(sys.argv) > 2:
-        fname = os.path.abspath(sys.argv[2])
-        print ("open " , fname)
+    
+    show_spheres = False
+    if not args['--spheres'] is None:
+        show_spheres = True if args["--spheres"] == 1 else False
+        
+    subvol_size = 80
+    if not args['--subvol'] is None:
+        subvol_size = int(args["--subvol"])
+    
+    if not args['--imagedata'] is None:
+        fname = os.path.abspath(args["--imagedata"])
         gui.openFileByPath(( (fname , ),))
+    
+    gui.setSubvolSize(subvol_size)
+    gui.dislayPointCloudAsSpheres(show_spheres)
+    
         
     sys.exit(App.exec())
-
+    
+     
+    
 
 if __name__ == "__main__":
     main()
