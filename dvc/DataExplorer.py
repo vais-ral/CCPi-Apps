@@ -331,80 +331,80 @@ class Window(QMainWindow):
             # render the point cloud
             
 
-                # clipping plane
-                #plane = vtk.vtkPlane()
-                plane = self.visPlane[0]
-                plane2 = self.visPlane[1]
-                #point = self.vtkPointCloud
-                clipper = self.planeClipper[0]
-                clipper2 = self.planeClipper[1]
-                plane.SetOrigin(0, 1., 0)
-                plane.SetNormal(0, 1, 0)
+            # clipping plane
+            #plane = vtk.vtkPlane()
+            plane = self.visPlane[0]
+            plane2 = self.visPlane[1]
+            #point = self.vtkPointCloud
+            clipper = self.planeClipper[0]
+            clipper2 = self.planeClipper[1]
+            plane.SetOrigin(0, 1., 0)
+            plane.SetNormal(0, 1., 0)
 
-                if not self.displaySpheres:
+            if not self.displaySpheres:
 
-                    #mapper = vtk.vtkPolyDataMapper()
-                    mapper = self.pointMapper
-                    mapper.SetInputData(self.pointPolyData)
-                    actor = self.vertexActor
-                    actor.SetMapper(mapper)
-                    actor.GetProperty().SetPointSize(3)
-                    actor.GetProperty().SetColor(0, 1, 1)
-                    self.pointActor = actor
-                    actor.VisibilityOff()
-                    clipper.SetInputData(self.pointPolyData)
+                #mapper = vtk.vtkPolyDataMapper()
+                mapper = self.pointMapper
+                mapper.SetInputData(self.pointPolyData)
+                actor = self.vertexActor
+                actor.SetMapper(mapper)
+                actor.GetProperty().SetPointSize(3)
+                actor.GetProperty().SetColor(0, 1, 1)
+                self.pointActor = actor
+                actor.VisibilityOff()
+                clipper.SetInputData(self.pointPolyData)
 
-                else:
-                    # subvolume
-                    # arrow
-                    subv_glyph = self.glyph3D
-                    subv_glyph.SetScaleFactor(1.)
-                    # arrow_glyph.SetColorModeToColorByVector()
-                    sphere_source = vtk.vtkSphereSource()
-                    spacing = self.vtkWidget.viewer.img3D.GetSpacing()
-                    radius = self.subvol / max(spacing)
-                    sphere_source.SetRadius(radius)
-                    sphere_source.SetThetaResolution(12)
-                    sphere_source.SetPhiResolution(12)
-                    sphere_mapper = self.sphereMapper
-                    sphere_mapper.SetInputConnection(
-                        subv_glyph.GetOutputPort())
+            else:
+                # subvolume
+                # arrow
+                subv_glyph = self.glyph3D
+                subv_glyph.SetScaleFactor(1.)
+                # arrow_glyph.SetColorModeToColorByVector()
+                sphere_source = vtk.vtkSphereSource()
+                spacing = self.vtkWidget.viewer.img3D.GetSpacing()
+                radius = self.subvol / max(spacing)
+                sphere_source.SetRadius(radius)
+                sphere_source.SetThetaResolution(12)
+                sphere_source.SetPhiResolution(12)
+                sphere_mapper = self.sphereMapper
+                sphere_mapper.SetInputConnection(
+                    subv_glyph.GetOutputPort())
 
-                    subv_glyph.SetInputData(self.pointPolyData)
-                    subv_glyph.SetSourceConnection(
-                        sphere_source.GetOutputPort())
+                subv_glyph.SetInputData(self.pointPolyData)
+                subv_glyph.SetSourceConnection(
+                    sphere_source.GetOutputPort())
 
-                    # Usual actor
-                    sphere_actor = self.sphereActor
-                    sphere_actor.SetMapper(sphere_mapper)
-                    sphere_actor.GetProperty().SetColor(1, 0, 0)
-                    sphere_actor.GetProperty().SetOpacity(0.2)
+                # Usual actor
+                sphere_actor = self.sphereActor
+                sphere_actor.SetMapper(sphere_mapper)
+                sphere_actor.GetProperty().SetColor(1, 0, 0)
+                sphere_actor.GetProperty().SetOpacity(0.2)
 
-                    clipper.SetInputConnection(subv_glyph.GetOutputPort())
-                #
-                clipper.SetClipFunction(plane)
-                clipper.InsideOutOn()
-                clipper2.SetClipFunction(plane2)
-                clipper2.InsideOutOn()
-                #clipper2.SetInputConnection(clipper.GetOutputPort())
+                clipper.SetInputConnection(subv_glyph.GetOutputPort())
+            #
+            clipper.SetClipFunction(plane)
+            clipper.InsideOutOn()
+            clipper2.SetClipFunction(plane2)
+            clipper2.InsideOutOn()
+            #clipper2.SetInputConnection(clipper.GetOutputPort())
 
-                selectMapper = self.selectMapper
-                selectMapper.SetInputConnection(clipper.GetOutputPort())
+            selectMapper = self.selectMapper
+            selectMapper.SetInputConnection(clipper.GetOutputPort())
 
-                selectActor = self.selectActor
-                #selectActor = vtk.vtkLODActor()
-                selectActor.SetMapper(selectMapper)
-                selectActor.GetProperty().SetColor(0, 1, 0)
-                selectActor.VisibilityOn()
-                #selectActor.SetScale(1.01, 1.01, 1.01)
-                selectActor.GetProperty().SetPointSize(3)
+            selectActor = self.selectActor
+            #selectActor = vtk.vtkLODActor()
+            selectActor.SetMapper(selectMapper)
+            selectActor.GetProperty().SetColor(0, 1, 0)
+            selectActor.VisibilityOn()
+            #selectActor.SetScale(1.01, 1.01, 1.01)
+            selectActor.GetProperty().SetPointSize(3)
 
-                # self.vtkWidget.viewer.getRenderer().AddActor(actor)
-                self.vtkWidget.viewer.getRenderer().AddActor(selectActor)
-                # self.vtkWidget.viewer.getRenderer().AddActor(sphere_actor)
-                print("currently present actors",
-                      self.vtkWidget.viewer.getRenderer().GetActors().GetNumberOfItems())
-                self.pointActorsAdded = True
+            # self.vtkWidget.viewer.getRenderer().AddActor(actor)
+            self.vtkWidget.viewer.getRenderer().AddActor(selectActor)
+            # self.vtkWidget.viewer.getRenderer().AddActor(sphere_actor)
+            print("currently present actors",
+                  self.vtkWidget.viewer.getRenderer().GetActors().GetNumberOfItems())
+            self.pointActorsAdded = True
         else:
             print("pointcloud already added")
 
@@ -425,7 +425,7 @@ class Window(QMainWindow):
             # this is pretty absurd but it seems the
             # plane cuts too much in Forward...
             offset = self.vtkWidget.viewer.img3D.GetSpacing()[orientation] -.1
-            offset = 2
+            offset = 1
             print ("offset" , offset)
             beta += offset
 
