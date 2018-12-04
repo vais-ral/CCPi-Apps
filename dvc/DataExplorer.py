@@ -79,7 +79,7 @@ class Window(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('CIL Viewer')
-        self.setGeometry(50, 50, 600, 600)
+        self.setGeometry(50, 50, 1200, 600)
 
         self.e = ErrorObserver()
 
@@ -288,49 +288,86 @@ class Window(QMainWindow):
             self.loadIntoTableWidget(self.pointcloud)
             self.renderPointCloud()
 
-    def addToPointCloud(self, pointcloud):
-        if len(pointcloud) > 0:
-            # 1. Load all of the point coordinates into a vtkPoints.
-            # Create the topology of the point (a vertex)
-
-            vertices = self.vertices
-            spacing = self.vtkWidget.viewer.img3D.GetSpacing()
-            origin  = self.vtkWidget.viewer.img3D.GetOrigin()
-            for count in range(len(pointcloud)):
-                p = self.vtkPointCloud.InsertNextPoint(pointcloud[count][1] * spacing[0] - origin[0],
-                                                       pointcloud[count][2] * spacing[1] - origin[1],
-                                                       pointcloud[count][3] * spacing[2] - origin[2])
-                vertices.InsertNextCell(1)
-                vertices.InsertCellPoint(p)
-            self.vtkPointCloud.Modified()
-            vertices.Modified()
-            # 2. Add the points to a vtkPolyData.
-            self.pointPolyData.SetPoints(self.vtkPointCloud)
-            self.pointPolyData.SetVerts(vertices)
-    
+#    def addToPointCloud(self, pointcloud):
+#        print ("clicked point {}".format(pointcloud))
+#        if len(pointcloud) > 0:
+#            
+#            # 1. Load all of the point coordinates into a vtkPoints.
+#            # Create the topology of the point (a vertex)
+#
+#            vertices = self.vertices
+#            spacing = self.vtkWidget.viewer.img3D.GetSpacing()
+#            origin  = self.vtkWidget.viewer.img3D.GetOrigin()
+#            
+#            # shift the location of the point which has been selected 
+#            # on the slicing plane as the current view orientation 
+#            # up 1 slice to be able to see it in front of the slice
+#            orientation = self.vtkWidget.viewer.GetSliceOrientation()
+#            # expected slice orientation at point selection time
+#            select_orientation = [ pointcloud[i]-int(pointcloud[i]) == 0 for i in range(3)]
+#            print ("view orientation {0}, pick orientation {1}".format(orientation, select_orientation))
+#            print ("clicked point {}".format(pointcloud))
+#            if select_orientation == orientation:
+#                pointcloud[orientation] += 1
+#            print ("visualised point {}".format(pointcloud))    
+#            for count in range(len(pointcloud)):
+#                p = self.vtkPointCloud.InsertNextPoint(pointcloud[count][1] * spacing[0] - origin[0],
+#                                                       pointcloud[count][2] * spacing[1] - origin[1],
+#                                                       pointcloud[count][3] * spacing[2] - origin[2])
+#                vertices.InsertNextCell(1)
+#                vertices.InsertCellPoint(p)
+#            self.vtkPointCloud.Modified()
+#            vertices.Modified()
+#            if not self.pointActorsAdded:
+#                # 2. Add the points to a vtkPolyData.
+#                self.pointPolyData.SetPoints(self.vtkPointCloud)
+#                self.pointPolyData.SetVerts(vertices)
+#    
     def renderPointCloud(self):
         if len(self.pointcloud) > 0:
             # 1. Load all of the point coordinates into a vtkPoints.
             # Create the topology of the point (a vertex)
-
+            #for point in self.pointcloud: 
+            #    print ("renderPointCloud " , point)
+            #    self.addToPointCloud(point)
+            # shift the location of the point which has been selected 
+            # on the slicing plane as the current view orientation 
+            # up 1 slice to be able to see it in front of the slice
+            orientation = self.vtkWidget.viewer.GetSliceOrientation()
+            
+            
+                
             vertices = self.vertices
             spacing = self.vtkWidget.viewer.img3D.GetSpacing()
             origin  = self.vtkWidget.viewer.img3D.GetOrigin()
             for count in range(len(self.pointcloud)):
+                # expected slice orientation at point selection time
+                point = self.pointcloud[count]
+                select_orientation = [ point[i]-int(point[i]) == 0 for i in range(1,4)].index(True)
+                print ("view orientation {0}, pick orientation {1}".format(orientation, select_orientation))
+                print ("clicked point {}".format(point))
+                print ("clicked point {}".format(self.pointcloud[count]))
+                if select_orientation == orientation:
+                    print ("pre update point {}".format(self.pointcloud[count][orientation]))
+                    self.pointcloud[count][orientation+1] = point[orientation+1] + 1
+                    print ("updated point {}".format(self.pointcloud[count][orientation+1]))
+                print ("visualised point {}".format(self.pointcloud[count]))
+                
                 p = self.vtkPointCloud.InsertNextPoint(self.pointcloud[count][1] * spacing[0] - origin[0],
                                                        self.pointcloud[count][2] * spacing[1] - origin[1],
                                                        self.pointcloud[count][3] * spacing[2] - origin[2])
                 vertices.InsertNextCell(1)
                 vertices.InsertCellPoint(p)
 
+            
+    
+        if not self.pointActorsAdded:
+            
             # 2. Add the points to a vtkPolyData.
             self.pointPolyData.SetPoints(self.vtkPointCloud)
             self.pointPolyData.SetVerts(vertices)
-    
-        if not self.pointActorsAdded:
-            # render the point cloud
             
-
+            # render the point cloud
             # clipping plane
             #plane = vtk.vtkPlane()
             plane = self.visPlane[0]
@@ -382,6 +419,8 @@ class Window(QMainWindow):
 
                 clipper.SetInputConnection(subv_glyph.GetOutputPort())
             #
+            clipper2.SetInputConnection(clipper.GetOutputPort())
+            
             clipper.SetClipFunction(plane)
             clipper.InsideOutOn()
             clipper2.SetClipFunction(plane2)
@@ -389,7 +428,7 @@ class Window(QMainWindow):
             #clipper2.SetInputConnection(clipper.GetOutputPort())
 
             selectMapper = self.selectMapper
-            selectMapper.SetInputConnection(clipper.GetOutputPort())
+            selectMapper.SetInputConnection(clipper2.GetOutputPort())
 
             selectActor = self.selectActor
             #selectActor = vtk.vtkLODActor()
@@ -424,20 +463,26 @@ class Window(QMainWindow):
         if event == "MouseWheelForwardEvent" and False:
             # this is pretty absurd but it seems the
             # plane cuts too much in Forward...
-            offset = self.vtkWidget.viewer.img3D.GetSpacing()[orientation] -.1
-            offset = 1
-            print ("offset" , offset)
-            beta += offset
-
+        #    slice_thickness = self.vtkWidget.viewer.img3D.GetSpacing()[orientation]
+            beta = 1
+        
+        spac = self.vtkWidget.viewer.img3D.GetSpacing()
+        orig = self.vtkWidget.viewer.img3D.GetOrigin()
+        slice_thickness = spac[orientation]
+        
         normal[orientation] = norm
-        origin[orientation] = self.vtkWidget.viewer.GetActiveSlice() + beta
+        origin [orientation] = (self.vtkWidget.viewer.GetActiveSlice() + beta) * \
+           slice_thickness - orig[orientation]
+            
         print("normal", normal)
         print("origin", origin)
         print("<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>")
 
         self.visPlane[0].SetOrigin(origin[0], origin[1], origin[2])
         self.visPlane[0].SetNormal(normal[0], normal[1], normal[2])
-        origin[orientation] = self.vtkWidget.viewer.GetActiveSlice() -1
+        beta += 1
+        origin [orientation] = (self.vtkWidget.viewer.GetActiveSlice() + beta) * \
+           slice_thickness - orig[orientation]
         self.visPlane[1].SetOrigin(origin[0], origin[1], origin[2])
         
         self.visPlane[1].SetNormal(normal[0], normal[1], normal[2])
@@ -480,7 +525,8 @@ class Window(QMainWindow):
 
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.tableDock)
 
-        self.tableDock.hide()
+        self.tableDock.show()
+        
 
     def loadIntoTableWidget(self, data):
         if len(data) <= 0:
@@ -498,9 +544,10 @@ class Window(QMainWindow):
         if self.interactiveEdit.isChecked() and self.tableDock.isVisible():
 
             position = interactor.GetEventPosition()
-
+            print("position {}".format(position))
             vox = self.vtkWidget.viewer.style.display2imageCoordinate(position, subvoxel=True)
-            print("[%d,%d,%d] : %.2g" % vox)
+            print("vox {}".format(vox))
+            # print("[%d,%d,%d] : %.2g" % vox)
             rows = self.tableWidget.rowCount()
             cols = self.tableWidget.columnCount()
 
