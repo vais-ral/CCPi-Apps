@@ -16,7 +16,7 @@ Options:
 
 import sys
 from PyQt5 import QtCore
-#from PyQt5 import QtGui
+from PyQt5 import QtGui
 #from PyQt5.QtWidgets import *
 from PyQt5.QtWidgets import QMainWindow
 from PyQt5.QtWidgets import QAction
@@ -29,8 +29,11 @@ from PyQt5.QtWidgets import QMessageBox
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtWidgets import QTableWidget
 from PyQt5.QtWidgets import QTableWidgetItem
+from PyQt5.QtWidgets import QWidget, QPushButton
+from PyQt5.QtWidgets import QFormLayout
 import vtk
 from ccpi.viewer.QVTKCILViewer import QVTKCILViewer
+from ccpi.viewer.QVTKWidget import QVTKWidget
 from ccpi.viewer.CILViewer2D import Converter
 from ccpi.viewer.CILViewer2D import SLICE_ORIENTATION_XY
 from ccpi.viewer.CILViewer2D import SLICE_ORIENTATION_XZ
@@ -42,6 +45,11 @@ import csv
 from functools import reduce
 from numbers import Number
 from docopt import docopt
+
+# Import linking class to join 2D and 3D viewers
+import ccpi.viewer.viewerLinker as vlink
+from ccpi.viewer.CILViewer import CILViewer
+from ccpi.viewer.CILViewer2D import CILViewer2D
 
 class ErrorObserver:
 
@@ -103,7 +111,12 @@ class Window(QMainWindow):
 
         self.frame = QFrame()
         self.vl = QVBoxLayout()
-        self.vtkWidget = QVTKCILViewer(self.frame)
+        
+        self.vtkWidget = QVTKWidget(
+                viewer=CILViewer2D, 
+                interactorStyle=vlink.Linked2DInteractorStyle
+                )
+        self.vtkWidget.viewer.debug = False
         self.iren = self.vtkWidget.getInteractor()
         self.vl.addWidget(self.vtkWidget)
 
@@ -113,12 +126,41 @@ class Window(QMainWindow):
         # init some viewer stuff
         self.pointActorsAdded = self.setupPointCloudPipeline()
                
+        # Add the 3D viewer widget
+        self.viewer3DWidget = QVTKWidget(
+                viewer=CILViewer, 
+                interactorStyle=vlink.Linked3DInteractorStyle
+                )
+        self.viewer3DWidget.viewer.debug = False
         
+        self.Dock3DContents = QWidget()
+        self.Dock3DContents.setStyleSheet("background-color: rgb(25,51,101)")
+        f_layout3D = QFormLayout(self.Dock3DContents)
+
+        self.Dock3D = QDockWidget(self)
+        self.Dock3D.setMinimumWidth(300)
+        self.Dock3D.setWindowTitle("3D View")
+        
+        f_layout3D.addWidget(self.viewer3DWidget)
+        self.Dock3D.setWidget(self.Dock3DContents)
+        self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, self.Dock3D)
+
+
+        # Initially link viewers
+        self.link2D3D = vlink.ViewerLinker(self.vtkWidget.viewer, 
+                                           self.viewer3DWidget.viewer)
+        self.link2D3D.setLinkPan(False)
+        self.link2D3D.setLinkZoom(False)
+        self.link2D3D.setLinkWindowLevel(True)
+        self.link2D3D.setLinkSlice(True)
+        self.link2D3D.enable()
+        
+
         # add observer to viewer events
         self.vtkWidget.viewer.style.AddObserver("MouseWheelForwardEvent",
-                                                self.updateClippingPlane, 0.9)
+                                                self.updateClippingPlane, 1.9)
         self.vtkWidget.viewer.style.AddObserver("MouseWheelBackwardEvent",
-                                                self.updateClippingPlane, 0.9)
+                                                self.updateClippingPlane, 1.9)
         self.vtkWidget.viewer.style.AddObserver('LeftButtonReleaseEvent',
                                                 self.OnLeftButtonReleaseEvent, 0.5)
         
@@ -135,6 +177,7 @@ class Window(QMainWindow):
         self.pointcloud = []
         
         self.show()
+
         
     def setupPointCloudPipeline(self):
         self.vtkPointCloud = vtk.vtkPoints()
@@ -240,6 +283,7 @@ class Window(QMainWindow):
 
         else:
             self.vtkWidget.viewer.setInput3DData(reader.GetOutput())
+            self.viewer3DWidget.viewer.setInput3DData(self.vtkWidget.viewer.img3D)
 
         self.setStatusTip('Ready')
 
@@ -288,42 +332,7 @@ class Window(QMainWindow):
             self.loadIntoTableWidget(self.pointcloud)
             self.renderPointCloud()
 
-#    def addToPointCloud(self, pointcloud):
-#        print ("clicked point {}".format(pointcloud))
-#        if len(pointcloud) > 0:
-#            
-#            # 1. Load all of the point coordinates into a vtkPoints.
-#            # Create the topology of the point (a vertex)
-#
-#            vertices = self.vertices
-#            spacing = self.vtkWidget.viewer.img3D.GetSpacing()
-#            origin  = self.vtkWidget.viewer.img3D.GetOrigin()
-#            
-#            # shift the location of the point which has been selected 
-#            # on the slicing plane as the current view orientation 
-#            # up 1 slice to be able to see it in front of the slice
-#            orientation = self.vtkWidget.viewer.GetSliceOrientation()
-#            # expected slice orientation at point selection time
-#            select_orientation = [ pointcloud[i]-int(pointcloud[i]) == 0 for i in range(3)]
-#            print ("view orientation {0}, pick orientation {1}".format(orientation, select_orientation))
-#            print ("clicked point {}".format(pointcloud))
-#            if select_orientation == orientation:
-#                pointcloud[orientation] += 1
-#            print ("visualised point {}".format(pointcloud))    
-#            for count in range(len(pointcloud)):
-#                p = self.vtkPointCloud.InsertNextPoint(pointcloud[count][1] * spacing[0] - origin[0],
-#                                                       pointcloud[count][2] * spacing[1] - origin[1],
-#                                                       pointcloud[count][3] * spacing[2] - origin[2])
-#                vertices.InsertNextCell(1)
-#                vertices.InsertCellPoint(p)
-#            self.vtkPointCloud.Modified()
-#            vertices.Modified()
-#            if not self.pointActorsAdded:
-#                # 2. Add the points to a vtkPolyData.
-#                self.pointPolyData.SetPoints(self.vtkPointCloud)
-#                self.pointPolyData.SetVerts(vertices)
-#    
-    def renderPointCloud(self):
+    def addToPointCloud(self):
         if len(self.pointcloud) > 0:
             # 1. Load all of the point coordinates into a vtkPoints.
             # Create the topology of the point (a vertex)
@@ -340,32 +349,45 @@ class Window(QMainWindow):
             vertices = self.vertices
             spacing = self.vtkWidget.viewer.img3D.GetSpacing()
             origin  = self.vtkWidget.viewer.img3D.GetOrigin()
+            print (">>>>>>>>>>>> RENDERPOINTCLOUD >>>>>>>>>>>>>>>")
+                
+            print ("origin" , origin)
+            print ("spacing" , spacing)
             for count in range(len(self.pointcloud)):
+                print (">>>>>>>>>>>> ADDING POINT {} >>>>>>>>>>>>>>>>".format(count))
                 # expected slice orientation at point selection time
-                point = self.pointcloud[count]
+                point = self.pointcloud[count][:]
                 select_orientation = [ point[i]-int(point[i]) == 0 for i in range(1,4)].index(True)
                 print ("view orientation {0}, pick orientation {1}".format(orientation, select_orientation))
                 print ("clicked point {}".format(point))
                 print ("clicked point {}".format(self.pointcloud[count]))
                 if select_orientation == orientation:
-                    print ("pre update point {}".format(self.pointcloud[count][orientation]))
-                    self.pointcloud[count][orientation+1] = point[orientation+1] + 1
-                    print ("updated point {}".format(self.pointcloud[count][orientation+1]))
-                print ("visualised point {}".format(self.pointcloud[count]))
+                    print ("pre update point {}".format(self.pointcloud[count][orientation+1]))
+                    beta = 1
+                    point[orientation+1] = point[orientation+1] + beta
+                    print ("updated point on axis {} {}".format(orientation, 
+                            point[orientation+1] * spacing[orientation] - origin[orientation]))
+                print ("visualised point {}".format(point))
                 
-                p = self.vtkPointCloud.InsertNextPoint(self.pointcloud[count][1] * spacing[0] - origin[0],
-                                                       self.pointcloud[count][2] * spacing[1] - origin[1],
-                                                       self.pointcloud[count][3] * spacing[2] - origin[2])
+                p = self.vtkPointCloud.InsertNextPoint(point[1] * spacing[0] - origin[0],
+                                                       point[2] * spacing[1] - origin[1],
+                                                       point[3] * spacing[2] - origin[2])
                 vertices.InsertNextCell(1)
                 vertices.InsertCellPoint(p)
-
-            
+                print(p)
+                print (">>>>>>>>>>>> POINT {} ADDED  >>>>>>>>>>>>>>>>".format(count))
+                
+       
+#    
+    def renderPointCloud(self):
+       
+        self.addToPointCloud()          
     
         if not self.pointActorsAdded:
             
             # 2. Add the points to a vtkPolyData.
             self.pointPolyData.SetPoints(self.vtkPointCloud)
-            self.pointPolyData.SetVerts(vertices)
+            self.pointPolyData.SetVerts(self.vertices)
             
             # render the point cloud
             # clipping plane
@@ -375,8 +397,8 @@ class Window(QMainWindow):
             #point = self.vtkPointCloud
             clipper = self.planeClipper[0]
             clipper2 = self.planeClipper[1]
-            plane.SetOrigin(0, 1., 0)
-            plane.SetNormal(0, 1., 0)
+            #plane.SetOrigin(0, 1., 0)
+            #plane.SetNormal(0, 1., 0)
 
             if not self.displaySpheres:
 
@@ -386,11 +408,12 @@ class Window(QMainWindow):
                 actor = self.vertexActor
                 actor.SetMapper(mapper)
                 actor.GetProperty().SetPointSize(3)
-                actor.GetProperty().SetColor(0, 1, 1)
+                actor.GetProperty().SetColor(1, .2, .2)
                 self.pointActor = actor
-                actor.VisibilityOff()
+                actor.VisibilityOn()
                 clipper.SetInputData(self.pointPolyData)
-
+                
+               
             else:
                 # subvolume
                 # arrow
@@ -418,35 +441,72 @@ class Window(QMainWindow):
                 sphere_actor.GetProperty().SetOpacity(0.2)
 
                 clipper.SetInputConnection(subv_glyph.GetOutputPort())
-            #
-            clipper2.SetInputConnection(clipper.GetOutputPort())
+                
+            
             
             clipper.SetClipFunction(plane)
             clipper.InsideOutOn()
             clipper2.SetClipFunction(plane2)
             clipper2.InsideOutOn()
-            #clipper2.SetInputConnection(clipper.GetOutputPort())
+            clipper2.SetInputConnection(clipper.GetOutputPort())
 
             selectMapper = self.selectMapper
             selectMapper.SetInputConnection(clipper2.GetOutputPort())
-
+            # selectMapper.AddClippingPlane(plane)
+            # selectMapper.SetInputData(self.pointPolyData)
+            # selectMapper.Update()
+            
             selectActor = self.selectActor
             #selectActor = vtk.vtkLODActor()
             selectActor.SetMapper(selectMapper)
-            selectActor.GetProperty().SetColor(0, 1, 0)
+            selectActor.GetProperty().SetColor(0, 1, .2)
             selectActor.VisibilityOn()
             #selectActor.SetScale(1.01, 1.01, 1.01)
-            selectActor.GetProperty().SetPointSize(3)
+            selectActor.GetProperty().SetPointSize(5)
 
-            # self.vtkWidget.viewer.getRenderer().AddActor(actor)
             self.vtkWidget.viewer.getRenderer().AddActor(selectActor)
+            self.viewer3DWidget.viewer.getRenderer().AddActor(actor)
+            
+            selectActor3D = vtk.vtkLODActor()
+            selectMapper3D = vtk.vtkPolyDataMapper()
+            selectMapper3D.SetInputConnection(clipper2.GetOutputPort())
+            
+            selectActor3D.SetMapper(selectMapper3D)
+            selectActor3D.GetProperty().SetColor(0, 1, .2)
+            selectActor3D.GetProperty().SetPointSize(5)
+            selectActor3D.VisibilityOn()
+            
+            
+            ### plane actors
+            self.setupPlanes()
+            # self.vtkWidget.viewer.getRenderer().AddActor(actor)
+            self.viewer3DWidget.viewer.getRenderer().AddActor(selectActor3D)
+            
+            
             # self.vtkWidget.viewer.getRenderer().AddActor(sphere_actor)
             print("currently present actors",
                   self.vtkWidget.viewer.getRenderer().GetActors().GetNumberOfItems())
+            print("currently present actors",
+                  self.viewer3DWidget.viewer.getRenderer().GetActors().GetNumberOfItems())
             self.pointActorsAdded = True
         else:
             print("pointcloud already added")
 
+    def setupPlanes(self):
+        self.planesource = [ vtk.vtkPlaneSource(), vtk.vtkPlaneSource() ]
+        self.planesource[0].SetCenter(self.visPlane[0].GetOrigin())
+        self.planesource[1].SetCenter(self.visPlane[1].GetOrigin())
+        self.planesource[0].SetNormal(self.visPlane[0].GetNormal())
+        self.planesource[1].SetNormal(self.visPlane[1].GetNormal())
+        
+        self.planemapper = [ vtk.vtkPolyDataMapper(), vtk.vtkPolyDataMapper() ]
+        self.planemapper[0].SetInputData(self.planesource[0].GetOutput())
+        self.planemapper[1].SetInputData(self.planesource[1].GetOutput())
+        
+        self.planeactor = [ vtk.vtkActor(), vtk.vtkActor() ] 
+        self.planeactor[0].SetMapper(self.planemapper[0])
+        self.planeactor[1].SetMapper(self.planemapper[1])
+        
     def updateClippingPlane(self, obj, event):
         print("caught updateClippingPlane!", event)
         normal = [0, 0, 0]
@@ -460,32 +520,54 @@ class Window(QMainWindow):
         elif orientation == SLICE_ORIENTATION_YZ:
             norm = 1
         beta = 0
-        if event == "MouseWheelForwardEvent" and False:
+        if event == "MouseWheelForwardEvent":
             # this is pretty absurd but it seems the
             # plane cuts too much in Forward...
         #    slice_thickness = self.vtkWidget.viewer.img3D.GetSpacing()[orientation]
-            beta = 1
+            beta = +2
         
         spac = self.vtkWidget.viewer.img3D.GetSpacing()
         orig = self.vtkWidget.viewer.img3D.GetOrigin()
         slice_thickness = spac[orientation]
         
         normal[orientation] = norm
-        origin [orientation] = (self.vtkWidget.viewer.GetActiveSlice() + beta) * \
+        origin [orientation] = (self.vtkWidget.viewer.GetActiveSlice() + beta ) * \
            slice_thickness - orig[orientation]
             
-        print("normal", normal)
-        print("origin", origin)
+        print("slice {} beta {} orig {} spac {}".format(self.vtkWidget.viewer.GetActiveSlice(), beta,
+              orig, spac ))
+        print("origin", origin, orientation)
         print("<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>")
 
         self.visPlane[0].SetOrigin(origin[0], origin[1], origin[2])
         self.visPlane[0].SetNormal(normal[0], normal[1], normal[2])
+        
+        # update the  plane below
         beta += 1
-        origin [orientation] = (self.vtkWidget.viewer.GetActiveSlice() + beta) * \
+        slice_below = self.vtkWidget.viewer.GetActiveSlice() -1 + beta
+        if slice_below < 0:
+            slice_below = 0
+        origin [orientation] = ( slice_below ) * \
            slice_thickness - orig[orientation]
         self.visPlane[1].SetOrigin(origin[0], origin[1], origin[2])
         
-        self.visPlane[1].SetNormal(normal[0], normal[1], normal[2])
+        self.visPlane[1].SetNormal(-normal[0], -normal[1], -normal[2])
+        self.vtkWidget.viewer.sliceActor.VisibilityOff()
+        self.vtkWidget.viewer.sliceActor.VisibilityOn()
+        
+        for i in range(2):
+            self.planesource[i].SetCenter(self.visPlane[i].GetOrigin())
+            self.planesource[i].SetNormal(self.visPlane[i].GetNormal())
+            self.planemapper[i].Update()
+            
+        
+        self.viewer3DWidget.viewer.getRenderer().AddActor(self.planeactor[0])
+        self.viewer3DWidget.viewer.getRenderer().AddActor(self.planeactor[1])
+            
+        
+        self.vtkWidget.viewer.getRenderer().Render()
+        self.viewer3DWidget.viewer.getRenderer().Render()
+        
     def setSubvolSize(self, subvolume):
         self.subvol = subvolume
 
@@ -544,9 +626,9 @@ class Window(QMainWindow):
         if self.interactiveEdit.isChecked() and self.tableDock.isVisible():
 
             position = interactor.GetEventPosition()
-            print("position {}".format(position))
+            print("pick position {}".format(position))
             vox = self.vtkWidget.viewer.style.display2imageCoordinate(position, subvoxel=True)
-            print("vox {}".format(vox))
+            print("pick vox {}".format(vox))
             # print("[%d,%d,%d] : %.2g" % vox)
             rows = self.tableWidget.rowCount()
             cols = self.tableWidget.columnCount()
@@ -560,7 +642,7 @@ class Window(QMainWindow):
             rows = self.tableWidget.rowCount()
             print("rows", rows)
             if rows == 1:
-                el = 2
+                el = 1
             else:
                 print("row {0} el {1} ".format(
                     rows, self.tableWidget.item(rows-2, 0).text()))
@@ -575,6 +657,7 @@ class Window(QMainWindow):
             else:
                 self.appendPointToCloud([el+1, vox[0], vox[1], vox[2]])
                 #self.renderPointCloud()
+            self.vtkWidget.viewer.getRenderer().Render()
 
     def appendPointToCloud(self, point):
         self.pointcloud.append(point)
