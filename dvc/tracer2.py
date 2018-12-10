@@ -103,12 +103,20 @@ class vtkMaskPolyData():
             for i in range(in_points.GetNumberOfPoints()):
                 pp = in_points.GetPoint(i)
                 
+                # get the point in image coordinate
+                ic = []
                 
+                mm = self.mask.GetScalarComponentAsDouble(int(ic[0]), 
+                                                          int(ic[1]),
+                                                          int(ic[2]), 0)
+                if mm == self.mask_value:
+                    out_points.InsertNextPoint(*pp)
             
             vertices = points2vertices(out_points)
             pointPolyData = vtk.vtkPolyData()
             pointPolyData.SetPoints(out_points)
             pointPolyData.SetVerts(vertices)
+            return pointPolyData
     
     
 # Start by loading some data.
@@ -233,8 +241,14 @@ t_filter.SetTransform(transform)
 t_filter.SetInputData(pointPolyData)
 t_filter.Update()
 
+
+masked_polydata = vtkMaskPolyData()
+masked_polydata.SetMask(stencil.GetOutput())
+masked_polydata.SetPolyDataInput(t_filter.GetOutput())
+
 mapper = vtk.vtk.vtkPolyDataMapper()
-mapper.SetInputConnection(t_filter.GetOutputPort())
+# mapper.SetInputConnection(t_filter.GetOutputPort())
+mapper.SetInputData(masked_polydata.GetOutput())
 
 actor = vtk.vtkLODActor()
 actor.SetMapper(mapper)
