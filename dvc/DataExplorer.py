@@ -91,23 +91,7 @@ class Window(QMainWindow):
 
         self.e = ErrorObserver()
 
-        openAction = QAction("Open", self)
-        openAction.setShortcut("Ctrl+O")
-        openAction.triggered.connect(self.openFile)
-
-        closeAction = QAction("Close", self)
-        closeAction.setShortcut("Ctrl+Q")
-        closeAction.triggered.connect(self.close)
-
-        tableAction = QAction("Edit Point Cloud", self)
-        tableAction.setShortcut("Ctrl+T")
-        tableAction.triggered.connect(self.editPointCloud)
-
-        mainMenu = self.menuBar()
-        fileMenu = mainMenu.addMenu('File')
-        fileMenu.addAction(openAction)
-        fileMenu.addAction(closeAction)
-        fileMenu.addAction(tableAction)
+        self.toolbar()
 
         self.frame = QFrame()
         self.vl = QVBoxLayout()
@@ -125,7 +109,7 @@ class Window(QMainWindow):
 
         # init some viewer stuff
         self.pointActorsAdded = self.setupPointCloudPipeline()
-               
+                       
         # Add the 3D viewer widget
         self.viewer3DWidget = QVTKWidget(
                 viewer=CILViewer, 
@@ -140,6 +124,9 @@ class Window(QMainWindow):
         self.Dock3D = QDockWidget(self)
         self.Dock3D.setMinimumWidth(300)
         self.Dock3D.setWindowTitle("3D View")
+        self.Dock3D.setFeatures(
+                QDockWidget.DockWidgetFloatable | 
+                QDockWidget.DockWidgetMovable)
         
         f_layout3D.addWidget(self.viewer3DWidget)
         self.Dock3D.setWidget(self.Dock3DContents)
@@ -155,6 +142,10 @@ class Window(QMainWindow):
         self.link2D3D.setLinkSlice(True)
         self.link2D3D.enable()
         
+        if self.show3D.isChecked():
+            self.Dock3D.show()
+        else:
+            self.Dock3D.hide()
 
         # add observer to viewer events
         self.vtkWidget.viewer.style.AddObserver("MouseWheelForwardEvent",
@@ -163,8 +154,10 @@ class Window(QMainWindow):
                                                 self.updateClippingPlane, 1.9)
         self.vtkWidget.viewer.style.AddObserver('LeftButtonReleaseEvent',
                                                 self.OnLeftButtonReleaseEvent, 0.5)
+        #self.vtkWidget.viewer.style.AddObserver('KeyPressEvent',
+        #                                        self.OnKeyPressEvent, 0.5)
         
-        self.toolbar()
+        # self.toolbar()
 
         self.createTableWidget()
 
@@ -200,6 +193,33 @@ class Window(QMainWindow):
         return False
         
     def toolbar(self):
+        openAction = QAction("Open", self)
+        openAction.setShortcut("Ctrl+O")
+        openAction.triggered.connect(self.openFile)
+
+        closeAction = QAction("Close", self)
+        closeAction.setShortcut("Ctrl+Q")
+        closeAction.triggered.connect(self.close)
+
+        tableAction = QAction("Edit Point Cloud", self)
+        tableAction.setShortcut("Ctrl+T")
+        tableAction.triggered.connect(self.editPointCloud)
+
+        mainMenu = self.menuBar()
+        fileMenu = mainMenu.addMenu('File')
+        fileMenu.addAction(openAction)
+        fileMenu.addAction(closeAction)
+        fileMenu.addAction(tableAction)
+        
+        
+        self.show3D = QAction("Show 3D View", self)
+        self.show3D.setCheckable(True)
+        self.show3D.setChecked(False)
+        #show3D.setShortcut("Ctrl+T")
+        self.show3D.triggered.connect(self.showHide3D)
+        viewMenu = mainMenu.addMenu('Visualisation')
+        viewMenu.addAction(self.show3D)
+        
         # Initialise the toolbar
         self.toolbar = self.addToolBar('Viewer tools')
 
@@ -217,6 +237,11 @@ class Window(QMainWindow):
         self.toolbar.addAction(openAction)
         self.toolbar.addAction(saveAction)
 
+    def showHide3D(self):
+        if self.show3D.isChecked():
+            self.Dock3D.show()
+        else:
+            self.Dock3D.hide()
         
     def openFile(self):
         fn = QFileDialog.getOpenFileNames(self, 'Open File')
@@ -349,33 +374,19 @@ class Window(QMainWindow):
             vertices = self.vertices
             spacing = self.vtkWidget.viewer.img3D.GetSpacing()
             origin  = self.vtkWidget.viewer.img3D.GetOrigin()
-            print (">>>>>>>>>>>> RENDERPOINTCLOUD >>>>>>>>>>>>>>>")
-                
-            print ("origin" , origin)
-            print ("spacing" , spacing)
             for count in range(len(self.pointcloud)):
-                print (">>>>>>>>>>>> ADDING POINT {} >>>>>>>>>>>>>>>>".format(count))
                 # expected slice orientation at point selection time
                 point = self.pointcloud[count][:]
                 select_orientation = [ point[i]-int(point[i]) == 0 for i in range(1,4)].index(True)
-                print ("view orientation {0}, pick orientation {1}".format(orientation, select_orientation))
-                print ("clicked point {}".format(point))
-                print ("clicked point {}".format(self.pointcloud[count]))
                 if select_orientation == orientation:
-                    print ("pre update point {}".format(self.pointcloud[count][orientation+1]))
                     beta = 1
                     point[orientation+1] = point[orientation+1] + beta
-                    print ("updated point on axis {} {}".format(orientation, 
-                            point[orientation+1] * spacing[orientation] - origin[orientation]))
-                print ("visualised point {}".format(point))
-                
+                    
                 p = self.vtkPointCloud.InsertNextPoint(point[1] * spacing[0] - origin[0],
                                                        point[2] * spacing[1] - origin[1],
                                                        point[3] * spacing[2] - origin[2])
                 vertices.InsertNextCell(1)
                 vertices.InsertCellPoint(p)
-                print(p)
-                print (">>>>>>>>>>>> POINT {} ADDED  >>>>>>>>>>>>>>>>".format(count))
                 
        
 #    
@@ -478,7 +489,8 @@ class Window(QMainWindow):
             
             
             ### plane actors
-            self.setupPlanes()
+            # self.setupPlanes()
+            
             # self.vtkWidget.viewer.getRenderer().AddActor(actor)
             self.viewer3DWidget.viewer.getRenderer().AddActor(selectActor3D)
             
@@ -508,7 +520,7 @@ class Window(QMainWindow):
         self.planeactor[1].SetMapper(self.planemapper[1])
         
     def updateClippingPlane(self, obj, event):
-        print("caught updateClippingPlane!", event)
+        # print("caught updateClippingPlane!", event)
         normal = [0, 0, 0]
         origin = [0, 0, 0]
         norm = 1
@@ -523,7 +535,6 @@ class Window(QMainWindow):
         if event == "MouseWheelForwardEvent":
             # this is pretty absurd but it seems the
             # plane cuts too much in Forward...
-        #    slice_thickness = self.vtkWidget.viewer.img3D.GetSpacing()[orientation]
             beta = +2
         
         spac = self.vtkWidget.viewer.img3D.GetSpacing()
@@ -534,10 +545,10 @@ class Window(QMainWindow):
         origin [orientation] = (self.vtkWidget.viewer.GetActiveSlice() + beta ) * \
            slice_thickness - orig[orientation]
             
-        print("slice {} beta {} orig {} spac {}".format(self.vtkWidget.viewer.GetActiveSlice(), beta,
-              orig, spac ))
-        print("origin", origin, orientation)
-        print("<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>")
+        # print("slice {} beta {} orig {} spac {}".format(self.vtkWidget.viewer.GetActiveSlice(), beta,
+        #      orig, spac ))
+        # print("origin", origin, orientation)
+        # print("<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>")
 
         self.visPlane[0].SetOrigin(origin[0], origin[1], origin[2])
         self.visPlane[0].SetNormal(normal[0], normal[1], normal[2])
@@ -552,21 +563,21 @@ class Window(QMainWindow):
         self.visPlane[1].SetOrigin(origin[0], origin[1], origin[2])
         
         self.visPlane[1].SetNormal(-normal[0], -normal[1], -normal[2])
-        self.vtkWidget.viewer.sliceActor.VisibilityOff()
-        self.vtkWidget.viewer.sliceActor.VisibilityOn()
+        # self.vtkWidget.viewer.sliceActor.VisibilityOff()
+        # self.vtkWidget.viewer.sliceActor.VisibilityOn()
         
-        for i in range(2):
-            self.planesource[i].SetCenter(self.visPlane[i].GetOrigin())
-            self.planesource[i].SetNormal(self.visPlane[i].GetNormal())
-            self.planemapper[i].Update()
+        
+        # for i in range(2):
+        #    self.planesource[i].SetCenter(self.visPlane[i].GetOrigin())
+        #    self.planesource[i].SetNormal(self.visPlane[i].GetNormal())
+        #    self.planemapper[i].Update()
             
         
-        self.viewer3DWidget.viewer.getRenderer().AddActor(self.planeactor[0])
-        self.viewer3DWidget.viewer.getRenderer().AddActor(self.planeactor[1])
-            
+        # self.viewer3DWidget.viewer.getRenderer().AddActor(self.planeactor[0])
+        # self.viewer3DWidget.viewer.getRenderer().AddActor(self.planeactor[1])
         
-        self.vtkWidget.viewer.getRenderer().Render()
-        self.viewer3DWidget.viewer.getRenderer().Render()
+        # self.vtkWidget.viewer.getRenderer().Render()
+        # self.viewer3DWidget.viewer.getRenderer().Render()
         
     def setSubvolSize(self, subvolume):
         self.subvol = subvolume
@@ -663,6 +674,8 @@ class Window(QMainWindow):
         self.pointcloud.append(point)
         self.pointActorsAdded = self.setupPointCloudPipeline()
         self.renderPointCloud()
+        
+    
         
 
 def main():
