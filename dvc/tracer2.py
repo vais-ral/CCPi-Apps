@@ -51,6 +51,7 @@ def createPoints(density , sliceno, image_data, orientation ):
     print ("max_y: {} {} {}".format(max_y, image_dimensions, density))
     
     z = sliceno * spacing_z - origin_z
+    print ("Sliceno {} Z {}".format(sliceno, z))
     
     # skip the offset in voxels
     offset = [1,1]
@@ -83,11 +84,24 @@ def points2vertices(points):
         # print (points.GetPoint(i))
     return vertices
 
+def world2imageCoordinate(world_coordinates, imagedata):
+    """
+    Convert from the world or global coordinates to image coordinates
+    :param world_coordinates: (x,y,z)
+    :return: rounded to next integer (x,y,z) in image coorindates eg. slice index
+    """
+    # dims = imagedata.GetDimensions()
+    spac = imagedata.GetSpacing()
+    orig = imagedata.GetOrigin()
+
+    return [round(world_coordinates[i] / spac[i] + orig[i]) for i in range(3)]
+    
 class vtkMaskPolyData():
     def __init__(self):
         self.polydata = None
         self.mask = None
         self.mask_value = 1
+        self.point_in_mask = 0
         
     def SetPolyDataInput(self, polydata):
         self.polydata = polydata
@@ -97,6 +111,7 @@ class vtkMaskPolyData():
         self.mask_value = value
     def GetOutput(self):
         '''returns a polydata object'''
+        self.point_in_mask = 0
         if self.polydata and self.mask:
             in_points = self.polydata.GetPoints()
             out_points = vtk.vtkPoints()
@@ -104,13 +119,24 @@ class vtkMaskPolyData():
                 pp = in_points.GetPoint(i)
                 
                 # get the point in image coordinate
-                ic = []
                 
-                mm = self.mask.GetScalarComponentAsDouble(int(ic[0]), 
+                ic = world2imageCoordinate(pp, self.mask)
+                i = 0
+                outside = False
+                while i < len(ic):
+                    outside = ic[i] < 0 or ic[i] >= self.mask.GetDimensions()[i]
+                    if outside:
+                        break
+                    i += 1
+
+                if not outside:
+                    mm = self.mask.GetScalarComponentAsDouble(int(ic[0]), 
                                                           int(ic[1]),
                                                           int(ic[2]), 0)
-                if mm == self.mask_value:
-                    out_points.InsertNextPoint(*pp)
+                    print ("value of point {} {}".format(mm, ic))
+                    if mm == self.mask_value:
+                        out_points.InsertNextPoint(*pp)
+                        self.point_in_mask += 1
             
             vertices = points2vertices(out_points)
             pointPolyData = vtk.vtkPolyData()
@@ -118,6 +144,10 @@ class vtkMaskPolyData():
             pointPolyData.SetVerts(vertices)
             return pointPolyData
     
+
+err = vtk.vtkFileOutputWindow()
+err.SetFileName("tracer2.log")
+vtk.vtkOutputWindow.SetInstance(err)
     
 # Start by loading some data.
 v16 = vtk.vtkMetaImageReader()
@@ -171,7 +201,7 @@ path.append( (85.59437561035156, 129.7857208251953, 0.0) )
 
 pathpoints = vtk.vtkPoints()
 for p in path:
-    pathpoints.InsertNextPoint(p[0],p[1],3.)
+    pathpoints.InsertNextPoint(p[0],p[1],3 * v16.GetOutput().GetSpacing()[2])
 
 # create a blank image
 dims = v16.GetOutput().GetDimensions()
@@ -210,7 +240,7 @@ stencil.Update()
 # 1 point per voxel both in x and y
 density = (1,2) 
 # which slice
-sliceno = 3
+sliceno = 0
 orientation = 2
 origin = v16.GetOutput().GetOrigin()
 spacing = v16.GetOutput().GetSpacing()
@@ -245,8 +275,10 @@ t_filter.Update()
 masked_polydata = vtkMaskPolyData()
 masked_polydata.SetMask(stencil.GetOutput())
 masked_polydata.SetPolyDataInput(t_filter.GetOutput())
+print ("masked point", masked_polydata.point_in_mask)
 
-mapper = vtk.vtk.vtkPolyDataMapper()
+
+mapper = vtk.vtkPolyDataMapper()
 # mapper.SetInputConnection(t_filter.GetOutputPort())
 mapper.SetInputData(masked_polydata.GetOutput())
 
@@ -262,4 +294,4 @@ v = CILViewer2D()
 # v.setInput3DData(v16.GetOutput())
 v.setInput3DData(stencil.GetOutput())
 v.ren.AddActor(actor)
-#v.startRenderLoop()
+v.startRenderLoop()
