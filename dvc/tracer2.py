@@ -35,9 +35,9 @@ def createPoints(density , sliceno, image_data, orientation ):
     image_spacing = list ( image_data.GetSpacing() ) 
     image_origin  = list ( image_data.GetOrigin() )
     image_dimensions = list ( image_data.GetDimensions() )
-    print ("spacing    : ", image_spacing)
-    print ("origin     : ", image_origin)
-    print ("dimensions : ", image_dimensions)
+    # print ("spacing    : ", image_spacing)
+    # print ("origin     : ", image_origin)
+    # print ("dimensions : ", image_dimensions)
     # reduce to 2D on the proper orientation
     spacing_z = image_spacing.pop(orientation)
     origin_z  = image_origin.pop(orientation)
@@ -47,11 +47,11 @@ def createPoints(density , sliceno, image_data, orientation ):
     max_x = int(image_dimensions[0] * density[0] )
     max_y = int(image_dimensions[1] * density[1] )
     
-    print ("max_x: {} {} {}".format(max_x, image_dimensions, density))
-    print ("max_y: {} {} {}".format(max_y, image_dimensions, density))
+    # print ("max_x: {} {} {}".format(max_x, image_dimensions, density))
+    # print ("max_y: {} {} {}".format(max_y, image_dimensions, density))
     
     z = sliceno * spacing_z - origin_z
-    print ("Sliceno {} Z {}".format(sliceno, z))
+    # print ("Sliceno {} Z {}".format(sliceno, z))
     
     # skip the offset in voxels
     offset = [1,1]
@@ -133,7 +133,7 @@ class vtkMaskPolyData():
                     mm = self.mask.GetScalarComponentAsDouble(int(ic[0]), 
                                                           int(ic[1]),
                                                           int(ic[2]), 0)
-                    print ("value of point {} {}".format(mm, ic))
+                    # print ("value of point {} {}".format(mm, ic))
                     if mm == self.mask_value:
                         out_points.InsertNextPoint(*pp)
                         self.point_in_mask += 1
@@ -221,9 +221,9 @@ mask1 = Converter.numpy2vtkImporter(numpy.ones(
                                    )
 mask0.Update()
 mask1.Update()
-print ("mask0", mask0.GetOutput().GetScalarTypeAsString())
-print ("mask1", mask1.GetOutput().GetScalarTypeAsString())
-print ("image", v16.GetOutput().GetScalarTypeAsString())
+# print ("mask0", mask0.GetOutput().GetScalarTypeAsString())
+# print ("mask1", mask1.GetOutput().GetScalarTypeAsString())
+# print ("image", v16.GetOutput().GetScalarTypeAsString())
 
 lasso = vtk.vtkLassoStencilSource()
 lasso.SetShapeToPolygon()
@@ -246,11 +246,18 @@ origin = v16.GetOutput().GetOrigin()
 spacing = v16.GetOutput().GetSpacing()
 dimensions = v16.GetOutput().GetDimensions()
 
+# The lasso is a purely 2D process, so it will produce a mask on slice 0 on 
+# the view direction. Possible workaround is to shift the lasso to the 
+# appropriate slice and then create the mask.
+shift_to_slice = vtk.vtkTransform()
+shift_to_slice.Translate(0,0,spacing[2]*sliceno)
+
 rotate = (0,30.,0)
 transform = vtk.vtkTransform()
 transform.Translate(dimensions[0]/2*spacing[0], dimensions[1]/2*spacing[1],0)
 transform.RotateZ(30.)
 transform.Translate(-dimensions[0]/2*spacing[0], -dimensions[1]/2*spacing[1],0)
+
 
 points = createPoints(density, sliceno , v16.GetOutput(), orientation)
 
@@ -275,12 +282,12 @@ t_filter.Update()
 masked_polydata = vtkMaskPolyData()
 masked_polydata.SetMask(stencil.GetOutput())
 masked_polydata.SetPolyDataInput(t_filter.GetOutput())
-print ("masked point", masked_polydata.point_in_mask)
 
 
 mapper = vtk.vtkPolyDataMapper()
 # mapper.SetInputConnection(t_filter.GetOutputPort())
 mapper.SetInputData(masked_polydata.GetOutput())
+print ("masked point", masked_polydata.point_in_mask)
 
 actor = vtk.vtkLODActor()
 actor.SetMapper(mapper)
