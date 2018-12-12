@@ -133,8 +133,9 @@ class vtkMaskPolyData():
                     mm = self.mask.GetScalarComponentAsDouble(int(ic[0]), 
                                                           int(ic[1]),
                                                           int(ic[2]), 0)
-                    # print ("value of point {} {}".format(mm, ic))
-                    if mm == self.mask_value:
+                    
+                    if int(mm) == self.mask_value:
+                        print ("value of point {} {}".format(mm, ic))
                         out_points.InsertNextPoint(*pp)
                         self.point_in_mask += 1
             
@@ -153,55 +154,64 @@ vtk.vtkOutputWindow.SetInstance(err)
 v16 = vtk.vtkMetaImageReader()
 v16.SetFileName(os.path.abspath("../../CCPi-Simpleflex/data/head.mha"))
 v16.Update()
+origin = v16.GetOutput().GetOrigin()
+spacing = v16.GetOutput().GetSpacing()
+dimensions = v16.GetOutput().GetDimensions()
 
+# create points in mask
+# 1 point per voxel both in x and y
+density = (0.5,0.6) 
+# which slice
+sliceno = 3
+orientation = 2
 
 
 
 path = []
 path.append( (74.66533660888672, 127.88501739501953, 0.0) )
-path.append( (76.09085845947266, 121.23255920410156, 0.0) )
-path.append( (76.09085845947266, 114.10491943359375, 0.0) )
-path.append( (76.5660400390625, 111.25386810302734, 0.0) )
+#path.append( (76.09085845947266, 121.23255920410156, 0.0) )
+#path.append( (76.09085845947266, 114.10491943359375, 0.0) )
+#path.append( (76.5660400390625, 111.25386810302734, 0.0) )
 path.append( (77.04121398925781, 110.30352020263672, 0.0) )
-path.append( (81.31779479980469, 104.12622833251953, 0.0) )
-path.append( (81.79296875, 104.12622833251953, 0.0) )
-path.append( (81.79296875, 103.65105438232422, 0.0) )
+#path.append( (81.31779479980469, 104.12622833251953, 0.0) )
+#path.append( (81.79296875, 104.12622833251953, 0.0) )
+#path.append( (81.79296875, 103.65105438232422, 0.0) )
 path.append( (82.26815032958984, 103.65105438232422, 0.0) )
-path.append( (82.74332427978516, 103.1758804321289, 0.0) )
-path.append( (85.59437561035156, 104.12622833251953, 0.0) )
-path.append( (87.49507904052734, 106.50211334228516, 0.0) )
+#path.append( (82.74332427978516, 103.1758804321289, 0.0) )
+#path.append( (85.59437561035156, 104.12622833251953, 0.0) )
+#path.append( (87.49507904052734, 106.50211334228516, 0.0) )
 path.append( (89.87095642089844, 108.40281677246094, 0.0) )
-path.append( (92.72201538085938, 110.30352020263672, 0.0) )
-path.append( (95.57306671142578, 112.67939758300781, 0.0) )
-path.append( (98.42412567138672, 114.5801010131836, 0.0) )
+#path.append( (92.72201538085938, 110.30352020263672, 0.0) )
+#path.append( (95.57306671142578, 112.67939758300781, 0.0) )
+#path.append( (98.42412567138672, 114.5801010131836, 0.0) )
 path.append( (98.89929962158203, 115.0552749633789, 0.0) )
-path.append( (103.1758804321289, 119.8070297241211, 0.0) )
-path.append( (103.65105438232422, 121.70773315429688, 0.0) )
-path.append( (104.60140991210938, 123.13326263427734, 0.0) )
+#path.append( (103.1758804321289, 119.8070297241211, 0.0) )
+#path.append( (103.65105438232422, 121.70773315429688, 0.0) )
+#path.append( (104.60140991210938, 123.13326263427734, 0.0) )
 path.append( (105.07658386230469, 126.9346694946289, 0.0) )
-path.append( (105.07658386230469, 128.36019897460938, 0.0) )
-path.append( (105.07658386230469, 128.8353729248047, 0.0) )
-path.append( (105.07658386230469, 129.310546875, 0.0) )
+#path.append( (105.07658386230469, 128.36019897460938, 0.0) )
+#path.append( (105.07658386230469, 128.8353729248047, 0.0) )
+#path.append( (105.07658386230469, 129.310546875, 0.0) )
 path.append( (105.07658386230469, 129.7857208251953, 0.0) )
-path.append( (104.12622833251953, 129.7857208251953, 0.0) )
-path.append( (100.80000305175781, 129.7857208251953, 0.0) )
-path.append( (95.57306671142578, 129.7857208251953, 0.0) )
+#path.append( (104.12622833251953, 129.7857208251953, 0.0) )
+#path.append( (100.80000305175781, 129.7857208251953, 0.0) )
+#path.append( (95.57306671142578, 129.7857208251953, 0.0) )
 path.append( (93.19718933105469, 129.7857208251953, 0.0) )
-path.append( (92.72201538085938, 129.7857208251953, 0.0) )
-path.append( (92.24684143066406, 129.7857208251953, 0.0) )
-path.append( (91.77165985107422, 129.7857208251953, 0.0) )
+#path.append( (92.72201538085938, 129.7857208251953, 0.0) )
+#path.append( (92.24684143066406, 129.7857208251953, 0.0) )
+#path.append( (91.77165985107422, 129.7857208251953, 0.0) )
 path.append( (89.87095642089844, 129.310546875, 0.0) )
-path.append( (88.92060852050781, 129.310546875, 0.0) )
-path.append( (88.4454345703125, 129.310546875, 0.0) )
-path.append( (86.54473114013672, 129.310546875, 0.0) )
+#path.append( (88.92060852050781, 129.310546875, 0.0) )
+#path.append( (88.4454345703125, 129.310546875, 0.0) )
+#path.append( (86.54473114013672, 129.310546875, 0.0) )
 path.append( (86.06954956054688, 129.310546875, 0.0) )
-path.append( (85.59437561035156, 129.310546875, 0.0) )
-path.append( (85.11920166015625, 129.310546875, 0.0) )
-path.append( (85.59437561035156, 129.7857208251953, 0.0) )
+#path.append( (85.59437561035156, 129.310546875, 0.0) )
+#path.append( (85.11920166015625, 129.310546875, 0.0) )
+#path.append( (85.59437561035156, 129.7857208251953, 0.0) )
 
 pathpoints = vtk.vtkPoints()
 for p in path:
-    pathpoints.InsertNextPoint(p[0],p[1],3 * v16.GetOutput().GetSpacing()[2])
+    pathpoints.InsertNextPoint(p[0],p[1],sliceno * v16.GetOutput().GetSpacing()[2])
 
 # create a blank image
 dims = v16.GetOutput().GetDimensions()
@@ -227,7 +237,8 @@ mask1.Update()
 
 lasso = vtk.vtkLassoStencilSource()
 lasso.SetShapeToPolygon()
-lasso.SetSlicePoints(0,pathpoints)
+# pass the slice at which the lasso has to process
+lasso.SetSlicePoints(sliceno , pathpoints)
 lasso.SetInformationInput(v16.GetOutput())
 
 stencil = vtk.vtkImageStencil()
@@ -236,21 +247,8 @@ stencil.SetBackgroundInputData(mask0.GetOutput())
 stencil.SetStencilConnection(lasso.GetOutputPort())
 stencil.Update()
 
-# create points in mask
-# 1 point per voxel both in x and y
-density = (1,2) 
-# which slice
-sliceno = 0
-orientation = 2
-origin = v16.GetOutput().GetOrigin()
-spacing = v16.GetOutput().GetSpacing()
-dimensions = v16.GetOutput().GetDimensions()
 
-# The lasso is a purely 2D process, so it will produce a mask on slice 0 on 
-# the view direction. Possible workaround is to shift the lasso to the 
-# appropriate slice and then create the mask.
-shift_to_slice = vtk.vtkTransform()
-shift_to_slice.Translate(0,0,spacing[2]*sliceno)
+
 
 rotate = (0,30.,0)
 transform = vtk.vtkTransform()
@@ -258,8 +256,9 @@ transform.Translate(dimensions[0]/2*spacing[0], dimensions[1]/2*spacing[1],0)
 transform.RotateZ(30.)
 transform.Translate(-dimensions[0]/2*spacing[0], -dimensions[1]/2*spacing[1],0)
 
-
 points = createPoints(density, sliceno , v16.GetOutput(), orientation)
+
+print ("createdPoints ", points.GetPoint(1))
 
 #%%
 
@@ -279,6 +278,9 @@ t_filter.SetInputData(pointPolyData)
 t_filter.Update()
 
 
+
+
+
 masked_polydata = vtkMaskPolyData()
 masked_polydata.SetMask(stencil.GetOutput())
 masked_polydata.SetPolyDataInput(t_filter.GetOutput())
@@ -296,9 +298,9 @@ actor.GetProperty().SetColor(1, .2, .2)
 actor.VisibilityOn()
 
 
-
-v = CILViewer2D()
-# v.setInput3DData(v16.GetOutput())
-v.setInput3DData(stencil.GetOutput())
-v.ren.AddActor(actor)
-v.startRenderLoop()
+if True:
+    v = CILViewer2D()
+    # v.setInput3DData(v16.GetOutput())
+    v.setInput3DData(stencil.GetOutput())
+    v.ren.AddActor(actor)
+    v.startRenderLoop()
