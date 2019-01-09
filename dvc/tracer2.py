@@ -18,6 +18,9 @@ from ccpi.viewer.CILViewer2D import Converter
 from ccpi.viewer.CILViewer import CILViewer
 import os
 import numpy
+from numbers import Integral
+from vtk.util.vtkAlgorithm import VTKPythonAlgorithmBase
+
 
 
 def createPoints(density , sliceno, image_data, orientation ):
@@ -95,8 +98,56 @@ def world2imageCoordinate(world_coordinates, imagedata):
     orig = imagedata.GetOrigin()
 
     return [round(world_coordinates[i] / spac[i] + orig[i]) for i in range(3)]
+
+class cilMaskPolyDataV1(object):
+    '''A filter to mask a vtkPolyData with an vtkImageData
     
-class vtkMaskPolyData():
+    https://blog.kitware.com/vtkpythonalgorithm-is-great/
+    '''
+    def __init__(self):
+        self._mask_value = 0
+        super(cilMaskPolyData, self).__init__()
+    
+    @property
+    def mask_value(self):
+        return self._mask_value
+    @mask_value.setter
+    def mask_value(self, mask_value):
+        if not isinstance(mask_value, Integral):
+            raise ValueError('Mask value must be an integer. Got' , mask_value)
+        self._mask_value = mask_value
+        
+    # VTK specific pipeline    
+    def Initialize(self, vtkself):
+        '''initialize the number of input and output ports of the algorithm'''
+        vtkself.SetNumberOfInputPorts(1)
+        vtkself.SetNumberOfOutputPorts(1)
+    def FillInputPortInformation(self, vtkself, port, info):
+        info.Set(vtk.vtkAlgorithm.INPUT_REQUIRED_DATA_TYPE(), "vtkDataSet")
+        return 1
+ 
+    def FillOutputPortInformation(self, vtkself, port, info):
+        info.Set(vtk.vtkDataObject.DATA_TYPE_NAME(), "vtkPolyData")
+        return 1
+    
+    def ProcessRequest(self, vtkself, request, inInfo, outInfo):
+        if request.Has(vtk.vtkDemandDrivenPipeline.REQUEST_DATA()):
+            inp = inInfo[0].GetInformationObject(0).Get(vtk.vtkDataObject.DATA_OBJECT())
+            opt = outInfo.GetInformationObject(0).Get(vtk.vtkDataObject.DATA_OBJECT())
+ 
+            cf = vtk.vtkContourFilter()
+            cf.SetInputData(inp)
+            cf.SetValue(0, self.mask_value)
+ 
+            sf = vtk.vtkShrinkPolyData()
+            sf.SetInputConnection(cf.GetOutputPort())
+            sf.Update()
+ 
+            opt.ShallowCopy(sf.GetOutput())
+        return 1
+    
+    
+class vtkMaskPolyData(object):
     def __init__(self):
         self.polydata = None
         self.mask = None
@@ -144,7 +195,91 @@ class vtkMaskPolyData():
             pointPolyData.SetPoints(out_points)
             pointPolyData.SetVerts(vertices)
             return pointPolyData
+
+class cilMaskPolyData(VTKPythonAlgorithmBase):
+    def __init__(self):
+          VTKPythonAlgorithmBase.__init__(self, nInputPorts=2, nOutputPorts=1)
+          self.__MaskValue = 1
+          
+    def SetMaskValue(self, mask_value):
+        if not isinstance(mask_value, Integral):
+            raise ValueError('Mask value must be an integer. Got' , mask_value)
+        
+        if mask_value != self.__MaskValue:
+            self.__MaskValue = mask_value
+            self.Modified()
+  
+    def GetMaskValue(self):
+        return self.__MaskValue
+            
+    def FillInputPortInformation(self, port, info):
+        if port == 0:
+            info.Set(vtk.vtkAlgorithm.INPUT_REQUIRED_DATA_TYPE(), "vtkPolyData")
+        elif port == 1:
+            info.Set(vtk.vtkAlgorithm.INPUT_REQUIRED_DATA_TYPE(), "vtkImageData")
+        return 1
+ 
+    def FillOutputPortInformation(self, port, info):
+        info.Set(vtk.vtkDataObject.DATA_TYPE_NAME(), "vtkPolyData")
+        return 1
+  
+    def RequestData(self, request, inInfo, outInfo):
+        self.point_in_mask = 0
+        in_points = vtk.vtkDataSet.GetData(inInfo[0])
+        mask = vtk.vtkDataSet.GetData(inInfo[1])
+        out_points = vtk.vtkPoints()
+        for i in range(in_points.GetNumberOfPoints()):
+            pp = in_points.GetPoint(i)
+            
+            # get the point in image coordinate
+            
+            ic = self.world2imageCoordinate(pp, mask)
+            i = 0
+            outside = False
+            while i < len(ic):
+                outside = ic[i] < 0 or ic[i] >= mask.GetDimensions()[i]
+                if outside:
+                    break
+                i += 1
+
+            if not outside:
+                mm = mask.GetScalarComponentAsDouble(int(ic[0]), 
+                                                      int(ic[1]),
+                                                      int(ic[2]), 0)
+                
+                if int(mm) == self.GetMaskValue():
+                    print ("value of point {} {}".format(mm, ic))
+                    out_points.InsertNextPoint(*pp)
+                    self.point_in_mask += 1
+        
+        vertices = self.points2vertices(out_points)
+        pointPolyData = vtk.vtkPolyData.GetData(outInfo)
+        pointPolyData.SetPoints(out_points)
+        pointPolyData.SetVerts(vertices)
+        print ("points in mask", self.point_in_mask)
+        return 1
     
+    def world2imageCoordinate(self, world_coordinates, imagedata):
+        """
+        Convert from the world or global coordinates to image coordinates
+        :param world_coordinates: (x,y,z)
+        :return: rounded to next integer (x,y,z) in image coorindates eg. slice index
+        """
+        # dims = imagedata.GetDimensions()
+        spac = imagedata.GetSpacing()
+        orig = imagedata.GetOrigin()
+    
+        return [round(world_coordinates[i] / spac[i] + orig[i]) for i in range(3)]
+    def points2vertices(self, points):
+        '''returns a vtkCellArray from a vtkPoints'''
+        
+        vertices = vtk.vtkCellArray()
+        for i in range(points.GetNumberOfPoints()):
+            vertices.InsertNextCell(1)
+            vertices.InsertCellPoint(i)
+            # print (points.GetPoint(i))
+        return vertices
+
 
 err = vtk.vtkFileOutputWindow()
 err.SetFileName("tracer2.log")
@@ -281,15 +416,21 @@ t_filter.Update()
 
 
 
-masked_polydata = vtkMaskPolyData()
-masked_polydata.SetMask(stencil.GetOutput())
-masked_polydata.SetPolyDataInput(t_filter.GetOutput())
+# masked_polydata = vtkMaskPolyData()
+# masked_polydata.SetMask(stencil.GetOutput())
+# masked_polydata.SetPolyDataInput(t_filter.GetOutput())
 
+polydata_masker = cilMaskPolyData()
+polydata_masker.SetMaskValue(1)
+polydata_masker.SetInputConnection(0, t_filter.GetOutputPort())
+polydata_masker.SetInputConnection(1, stencil.GetOutputPort())
+polydata_masker.Update()
 
 mapper = vtk.vtkPolyDataMapper()
 # mapper.SetInputConnection(t_filter.GetOutputPort())
-mapper.SetInputData(masked_polydata.GetOutput())
-print ("masked point", masked_polydata.point_in_mask)
+# mapper.SetInputData(masked_polydata.GetOutput())
+mapper.SetInputConnection(polydata_masker.GetOutputPort())
+print ("masked point", polydata_masker.point_in_mask)
 
 actor = vtk.vtkLODActor()
 actor.SetMapper(mapper)
