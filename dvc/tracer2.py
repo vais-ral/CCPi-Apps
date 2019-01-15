@@ -18,9 +18,8 @@ from ccpi.viewer.CILViewer2D import Converter
 from ccpi.viewer.CILViewer import CILViewer
 import os
 import numpy
-from numbers import Integral
+from numbers import Integral, Number
 from vtk.util.vtkAlgorithm import VTKPythonAlgorithmBase
-
 
 
 def createPoints(density , sliceno, image_data, orientation ):
@@ -280,6 +279,311 @@ class cilMaskPolyData(VTKPythonAlgorithmBase):
             # print (points.GetPoint(i))
         return vertices
 
+class cilClipPolyDataBetweenPlanes(VTKPythonAlgorithmBase):
+    def __init__(self):
+          VTKPythonAlgorithmBase.__init__(self, nInputPorts=1, nOutputPorts=1)
+          self.__PlaneOrigin    = 0
+          self.__PlaneNormal    = 1
+          self.__PlaneDistance  = 1
+          self.planesource = [ vtk.vtkPlaneSource(), vtk.vtkPlaneSource() ]
+          self.visPlane = [ vtk.vtkPlane() , vtk.vtkPlane() ]
+          self.planeClipper =  [ vtk.vtkClipPolyData() , vtk.vtkClipPolyData()]
+          
+          self.planesource[0].SetCenter(self.visPlane[0].GetOrigin())
+          self.planesource[1].SetCenter(self.visPlane[1].GetOrigin())
+          self.planesource[0].SetNormal(self.visPlane[0].GetNormal())
+          self.planesource[1].SetNormal(self.visPlane[1].GetNormal())
+          
+    def SetPlaneOrigin(self, value):
+        if not isinstance(value, Number):
+            raise ValueError('PlaneOrigin must be a number. Got' , value)
+        
+        if value != self.__PlaneOrigin:
+            self.__PlaneOrigin = value
+            self.Modified()
+  
+    def GetPlaneOrigin(self):
+        return self.__PlaneOrigin
+    
+    def SetPlaneNormal(self, value):
+        if not isinstance(value, Number):
+            raise ValueError('PlaneNormal must be a number. Got' , value)
+        
+        if value != self.__PlaneNormal:
+            self.__PlaneNormal = value
+            self.Modified()
+  
+    def GetPlaneNormal(self):
+        return self.__PlaneNormal
+    
+    def SetPlaneDistance(self, value):
+        if not isinstance(value, Number):
+            raise ValueError('PlaneDistance must be a number. Got' , value)
+        if not value > 0:
+            raise ValueError('PlaneDistance must be positive.')
+        
+        if value != self.__PlaneDistance:
+            self.__PlaneDistance = value
+            self.Modified()
+  
+    def GetPlanePlaneDistance(self):
+        return self.__PlaneDistance
+            
+    def FillInputPortInformation(self, port, info):
+        if port == 0:
+            info.Set(vtk.vtkAlgorithm.INPUT_REQUIRED_DATA_TYPE(), "vtkPolyData")
+        
+        return 1
+ 
+    def FillOutputPortInformation(self, port, info):
+        info.Set(vtk.vtkDataObject.DATA_TYPE_NAME(), "vtkPolyData")
+        return 1
+  
+    def RequestData(self, request, inInfo, outInfo):
+        
+        return 1
+    
+
+class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
+    CIRCLE = 'circle'
+    SQUARE = 'square'
+    CUBE   = 'cube'
+    SPHERE = 'sphere'
+    def __init__(self):
+          VTKPythonAlgorithmBase.__init__(self, nInputPorts=1, nOutputPorts=1)
+          self.__points = vtk.vtkPoints()
+          self.__vertices = vtk.vtkCellArray()
+          self.__Density = [ 1., 1., 1.]
+          self.__Orientation = 2
+          self.__Overlap = [0.2, 0.2, 0.2] #: 3D overlap
+          
+    def SetDensity(self, dimension, value):
+        if not isinstance(value, Number):
+            raise ValueError('Mask value must be a number. Got' , value)
+        if not dimension in [0, 1, 2]:
+            raise ValueError('dimension must be in [0, 1, 2]. Got' , value)
+        
+        
+        if value != self.__Density[dimension]:
+            self.__Density[dimension] = value
+            self.Modified()
+  
+    def GetDensity(self):
+        return self.__Density
+    
+    def SetOrientation(self, value):
+        if not value in [0, 1, 2]:
+            raise ValueError('Orientation must be in [0,1,2]. Got', value)
+        if self.__Orientation =! value:
+            self.__Orientation = value
+            self.Modified()
+    
+    def GetOrientation(self):
+        return self.__Orientation
+            
+    def FillInputPortInformation(self, port, info):
+        if port == 0:
+            info.Set(vtk.vtkAlgorithm.INPUT_REQUIRED_DATA_TYPE(), "vtkImageData")
+        return 1
+ 
+    def FillOutputPortInformation(self, port, info):
+        info.Set(vtk.vtkDataObject.DATA_TYPE_NAME(), "vtkPolyData")
+        return 1
+  
+    def RequestData(self, request, inInfo, outInfo):
+        
+        self.point_in_mask = 0
+        in_points = vtk.vtkDataSet.GetData(inInfo[0])
+        mask = vtk.vtkDataSet.GetData(inInfo[1])
+        out_points = vtk.vtkPoints()
+        for i in range(in_points.GetNumberOfPoints()):
+            pp = in_points.GetPoint(i)
+            
+            # get the point in image coordinate
+            
+            ic = self.world2imageCoordinate(pp, mask)
+            i = 0
+            outside = False
+            while i < len(ic):
+                outside = ic[i] < 0 or ic[i] >= mask.GetDimensions()[i]
+                if outside:
+                    break
+                i += 1
+
+            if not outside:
+                mm = mask.GetScalarComponentAsDouble(int(ic[0]), 
+                                                      int(ic[1]),
+                                                      int(ic[2]), 0)
+                
+                if int(mm) == self.GetMaskValue():
+                    print ("value of point {} {}".format(mm, ic))
+                    out_points.InsertNextPoint(*pp)
+                    self.point_in_mask += 1
+        
+        vertices = self.points2vertices(out_points)
+        pointPolyData = vtk.vtkPolyData.GetData(outInfo)
+        pointPolyData.SetPoints(out_points)
+        pointPolyData.SetVerts(vertices)
+        print ("points in mask", self.point_in_mask)
+        return 1
+    
+    def createPoints2D(self, density , sliceno, image_data, orientation ):
+        '''creates a 2D point cloud on the image data on the selected orientation
+        
+        input:
+            density: points/voxel (list or tuple)
+            image_data: vtkImageData onto project the pointcloud
+            orientation: orientation of the slice onto which create the point cloud
+            
+        returns: 
+            vtkPoints
+        '''
+        vtkPointCloud = self.__points
+        image_spacing = list ( image_data.GetSpacing() ) 
+        image_origin  = list ( image_data.GetOrigin() )
+        image_dimensions = list ( image_data.GetDimensions() )
+        # print ("spacing    : ", image_spacing)
+        # print ("origin     : ", image_origin)
+        # print ("dimensions : ", image_dimensions)
+        # reduce to 2D on the proper orientation
+        spacing_z = image_spacing.pop(orientation)
+        origin_z  = image_origin.pop(orientation)
+        dim_z     = image_dimensions.pop(orientation)
+           
+        # the total number of points on X and Y axis
+        max_x = int(image_dimensions[0] * density[0] )
+        max_y = int(image_dimensions[1] * density[1] )
+        
+        # print ("max_x: {} {} {}".format(max_x, image_dimensions, density))
+        # print ("max_y: {} {} {}".format(max_y, image_dimensions, density))
+        
+        z = sliceno * spacing_z - origin_z
+        # print ("Sliceno {} Z {}".format(sliceno, z))
+        
+        # skip the offset in voxels
+        offset = [1,1]
+        n_x = offset[0]
+         
+        while n_x < max_x:
+            # x axis
+            n_y = offset[1]
+            while n_y < max_y:
+                # y axis
+                x = (n_x / max_x) * image_spacing[0] * image_dimensions[0]- image_origin[0] #+ int(image_dimensions[0] * density[0] * .7) 
+                y = (n_y / max_y) * image_spacing[1] * image_dimensions[1]- image_origin[1] #+ int(image_dimensions[1] * density[1] * .7)
+                
+                p = vtkPointCloud.InsertNextPoint( x , y , z)
+                
+                
+                n_y += 1
+                
+            n_x += 1
+        
+        return vtkPointCloud  
+    
+    def CreatePoints3D(self, density , sliceno, image_data, orientation ):
+        '''creates a 2D point cloud on the image data on the selected orientation
+        
+        input:
+            density: points/voxel (list or tuple)
+            image_data: vtkImageData onto project the pointcloud
+            orientation: orientation of the slice onto which create the point cloud
+            
+        returns: 
+            vtkPoints
+        '''
+        vtkPointCloud = self.__points
+        image_spacing = list ( image_data.GetSpacing() ) 
+        image_origin  = list ( image_data.GetOrigin() )
+        image_dimensions = list ( image_data.GetDimensions() )
+          
+        # the total number of points on X and Y axis
+        max_x = int(image_dimensions[0] * density[0] )
+        max_y = int(image_dimensions[1] * density[1] )
+        max_z = int(image_dimensions[2] * density[2] )
+        
+        # print ("max_x: {} {} {}".format(max_x, image_dimensions, density))
+        # print ("max_y: {} {} {}".format(max_y, image_dimensions, density))
+        
+        # print ("Sliceno {} Z {}".format(sliceno, z))
+        
+        # skip the offset in voxels
+        offset = [1, 1, 1]
+        n_x = offset[0]
+         
+        while n_x < max_x:
+            # x axis
+            n_y = offset[1]
+            while n_y < max_y:
+                # y axis
+                n_z = offset[1]
+                while n_z < max_z:
+                    x = (n_x / max_x) * image_spacing[0] * image_dimensions[0]- image_origin[0] #+ int(image_dimensions[0] * density[0] * .7) 
+                    y = (n_y / max_y) * image_spacing[1] * image_dimensions[1]- image_origin[1] #+ int(image_dimensions[1] * density[1] * .7)
+                    z = (n_z / max_z) * image_spacing[2] * image_dimensions[2]- image_origin[2] #+ int(image_dimensions[1] * density[1] * .7)
+                    
+                    p = vtkPointCloud.InsertNextPoint( x, y, z )
+                    n_z += 1
+                
+                n_y += 1
+                
+            n_x += 1
+        
+        return 1
+    def FillCells(self):
+        vertices = self.__vertices
+        for i in range(self.__points.GetNumberOfPoints()):
+            vertices.InsertNextCell(1)
+            vertices.InsertCellPoint(i)
+    
+    def CalculateDensity(self, overlap, mode=SPHERE):
+        '''returns the ratio between the figure size (radius) and the distance between 2 figures centers in 3D'''
+        if isinstance (overlap, tuple):
+            d = [self.distance_from_overlap(ovl, mode=mode) for ovl in overlap]
+        elif isinstance(overlap, float):
+            d = [self.distance_from_overlap(overlap, mode=mode)]
+            d += [d[-1]]
+            d += [d[-1]]
+        
+            
+    def overlap(self, radius, center_distance, mode=SPHERE):
+        if center_distance <= 2*radius:
+            if mode == 'circle':
+                overlap = (2 * numpy.acos(center_distance/radius/2.) - \
+                           (center_distance/radius) *  numpy.sqrt(1 - \
+                           (center_distance/radius/2.)*(center_distance/radius/2.)) \
+                          ) / 3.1415 * 100
+            elif mode == 'square':
+                overlap = (1 - center_distance/radius ) * 100
+            elif mode == 'cube':
+                overlap = (1 - center_distance/radius ) * 100
+            elif mode == 'sphere':
+                overlap = (2. * radius - center_distance)**2  *\
+                          (center_distance + 4 * radius) / \
+                          (16 * radius ** 3 ) * 100
+            else:
+                raise ValueError('unsupported mode',mode)
+        else:
+            overlap = 0
+        return overlap
+    
+    def distance_from_overlap(self, req, interp=False, N=1000, mode='sphere'):
+        '''hard inversion'''
+        x = [2.* i/N for i in range(N+1)]
+        y = [self.overlap(1,x[i], mode=mode) - req for i in range(N+1)]
+        
+        # find the value closer to 0 for required overlap
+        idx = (y.index(min (y, key=abs)))
+        if interp:
+            if y[idx] * y[idx+1] < 0:
+                m = (y[idx] -y[idx+1]) / (x[idx] -x[idx+1])
+            else:
+                m = (y[idx] -y[idx-1]) / (x[idx] -x[idx-1])
+            q = y[idx] - m * x[idx]
+            x = -q / m
+        else:
+            x = x[idx]
+        return x
 
 err = vtk.vtkFileOutputWindow()
 err.SetFileName("tracer2.log")
@@ -394,6 +698,7 @@ transform.Translate(-dimensions[0]/2*spacing[0], -dimensions[1]/2*spacing[1],0)
 points = createPoints(density, sliceno , v16.GetOutput(), orientation)
 
 print ("createdPoints ", points.GetPoint(1))
+print ("spacing" , v16.GetOutput().GetSpacing())
 
 #%%
 
