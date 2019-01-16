@@ -103,26 +103,42 @@ for p in path:
 dims = v16.GetOutput().GetDimensions()
 
 mask0 = Converter.numpy2vtkImporter(numpy.zeros(
-                                     (dims[2],dims[1],dims[0]), 
-                                     order='F', dtype=numpy.uint16) , 
+                                     (dims[0],dims[1],dims[2]), 
+                                     order='C', dtype=numpy.uint16) , 
                                    spacing = v16.GetOutput().GetSpacing(), 
                                    origin = v16.GetOutput().GetOrigin(),
-                                   transpose=[0,1,2]
+                                   transpose=[2,1,0]
                                    )
 # create an image with 1 in it
 mask1 = Converter.numpy2vtkImporter(numpy.ones(
-                                     (dims[2],dims[1],dims[0]), 
-                                     order='F', dtype=numpy.uint16), 
+                                     (dims[0],dims[1],dims[2]), 
+                                     order='C', dtype=numpy.uint16), 
                                    spacing = v16.GetOutput().GetSpacing(), 
                                    origin = v16.GetOutput().GetOrigin(),
-                                   transpose=[0,1,2]
+                                   transpose=[2,1,0]
                                    )
     
 
 mask0.Update()
 mask1.Update()
+print (mask0.GetOutput().GetScalarTypeAsString())
+print (mask1.GetOutput().GetScalarTypeAsString())
 
-#%%
+#%%#%%
+sumimage = vtk.vtkImageData()
+sumimage.DeepCopy(mask0.GetOutput())
+print (sumimage.GetScalarTypeAsString())
+
+mat = vtk.vtkImageMathematics()
+mat.SetInput1Data(mask0.GetOutput())
+mat.SetInput2Data(mask1.GetOutput())
+mat.SetOutput(sumimage)
+mat.SetOperationToAddConstant()
+mat.SetConstantC(2)
+mat.Update()
+print (sumimage.GetScalarComponentAsDouble(0,0,0,0))
+print (mat.GetOutput().GetScalarComponentAsDouble(0,0,0,0))
+
 
 lasso = vtk.vtkLassoStencilSource()
 lasso.SetShapeToPolygon()
