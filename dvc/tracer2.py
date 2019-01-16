@@ -343,20 +343,36 @@ class cilClipPolyDataBetweenPlanes(VTKPythonAlgorithmBase):
         
         return 1
     
-
-class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
+#%%
+class cilRegularPointCloudToPolyData(VTKPythonAlgorithmBase):
     CIRCLE = 'circle'
     SQUARE = 'square'
     CUBE   = 'cube'
     SPHERE = 'sphere'
     def __init__(self):
           VTKPythonAlgorithmBase.__init__(self, nInputPorts=1, nOutputPorts=1)
-          self.__points = vtk.vtkPoints()
-          self.__vertices = vtk.vtkCellArray()
+          self.__Points = vtk.vtkPoints()
+          self.__Vertices = vtk.vtkCellArray()
           self.__Density = [ 1., 1., 1.]
           self.__Orientation = 2
           self.__Overlap = [0.2, 0.2, 0.2] #: 3D overlap
+          self.__Dimensionality = 3
+          self.__SliceNumber = 0
+          self.__Mode = self.SPHERE
+          self.__SubVolumeRadius = 1 #: Radius of the subvolume in voxels
           
+    def SetMode(self, value):
+        if not value in [self.CIRCLE, self.SQUARE, self.CUBE, self.SPHERE]:
+            raise ValueError('dimension must be in [circle, square, cube, sphere]. Got', 
+                             value)
+        
+        if value != self.__Mode:
+            self.__Mode = value
+            self.Modified()
+  
+    def GetMode(self):
+        return self.__Mode
+    
     def SetDensity(self, dimension, value):
         if not isinstance(value, Number):
             raise ValueError('Mask value must be a number. Got' , value)
@@ -371,15 +387,63 @@ class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
     def GetDensity(self):
         return self.__Density
     
+    def SetDimensionality(self, value):
+        if not value in [2, 3]:
+            raise ValueError('Dimensionality must be in [2, 3]. Got', value)
+        
+        if self.__Dimensionality != value:
+            self.__Dimensionality = value
+            self.Modified()
+    def GetDimensionality(self):
+        return self.__Dimensionality
+    
+    def SetOverlap(self, dimension, value):
+        if not isinstance(value, Number):
+            raise ValueError('Overlap value must be a number. Got' , value)
+        if not dimension in [0, 1, 2]:
+            raise ValueError('dimension must be in [0, 1, 2]. Got' , value)
+        if value != self.__Overlap[dimension]:
+            self.__Overlap[dimension] = value
+            self.Modified()
+    def GetOverlap(self):
+        return self.__Overlap
+    
+    def SetSlice(self, value):
+        if not isinstance(value, int):
+            raise ValueError('Slice must be a positive integer. Got', value)
+        if not value >= 0:
+            raise ValueError('Slice must be a positive integer. Got', value)
+        if self.__SliceNumber != value:
+            self.__SliceNumber = value
+            self.Modified()
+    def GetSlice(self):
+        return self.__SliceNumber
+        
+    def GetNumberOfPoints(self):
+        return self.__Points.GetNumberOfPoints()
+    
     def SetOrientation(self, value):
         if not value in [0, 1, 2]:
             raise ValueError('Orientation must be in [0,1,2]. Got', value)
-        if self.__Orientation =! value:
+        if self.__Orientation != value:
             self.__Orientation = value
             self.Modified()
     
     def GetOrientation(self):
         return self.__Orientation
+    
+    def SetSubVolumeRadiusInVoxel(self, value):
+        '''Set the radius of the subvolume in voxel'''
+        if not isinstance(value, Number):
+            raise ValueError('SubVolumeRadius must be a number larger than 1. Got', value)
+        if not value > 1:
+            raise ValueError('SubVolumeRadius must be a number larger than 1. Got', value)
+        if self.__SubVolumeRadius != value:
+            self.__SubVolumeRadius = value
+            self.Modified()
+    
+    def GetSubVolumeRadiusInVoxel(self):
+        return self.__SubVolumeRadius
             
     def FillInputPortInformation(self, port, info):
         if port == 0:
@@ -392,42 +456,35 @@ class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
   
     def RequestData(self, request, inInfo, outInfo):
         
-        self.point_in_mask = 0
-        in_points = vtk.vtkDataSet.GetData(inInfo[0])
-        mask = vtk.vtkDataSet.GetData(inInfo[1])
-        out_points = vtk.vtkPoints()
-        for i in range(in_points.GetNumberOfPoints()):
-            pp = in_points.GetPoint(i)
-            
-            # get the point in image coordinate
-            
-            ic = self.world2imageCoordinate(pp, mask)
-            i = 0
-            outside = False
-            while i < len(ic):
-                outside = ic[i] < 0 or ic[i] >= mask.GetDimensions()[i]
-                if outside:
-                    break
-                i += 1
-
-            if not outside:
-                mm = mask.GetScalarComponentAsDouble(int(ic[0]), 
-                                                      int(ic[1]),
-                                                      int(ic[2]), 0)
-                
-                if int(mm) == self.GetMaskValue():
-                    print ("value of point {} {}".format(mm, ic))
-                    out_points.InsertNextPoint(*pp)
-                    self.point_in_mask += 1
-        
-        vertices = self.points2vertices(out_points)
+        print ("Request Data")
+        image_data = vtk.vtkDataSet.GetData(inInfo[0])
         pointPolyData = vtk.vtkPolyData.GetData(outInfo)
-        pointPolyData.SetPoints(out_points)
-        pointPolyData.SetVerts(vertices)
-        print ("points in mask", self.point_in_mask)
+        
+        orientation = self.GetOrientation()
+        print ("orientation", orientation)
+        dimensionality = self.GetDimensionality()
+        print ("dimensionality", dimensionality)
+        
+        overlap = self.GetOverlap()
+        print ("overlap", overlap)
+        point_spacing = self.CalculatePointSpacing(overlap, mode=self.GetMode())
+        print ("density", density)
+        if dimensionality == 3:
+            self.CreatePoints3D(point_spacing, image_data, orientation)
+        else:
+            sliceno = self.GetSlice()
+            if image_data.GetDimensions()[orientation] < sliceno:
+                raise ValueError('Requested slice is outside the image.' , sliceno)
+            
+            self.CreatePoints2D(point_spacing, sliceno, image_data, orientation)
+            
+        self.FillCells()
+        
+        pointPolyData.SetPoints(self.__Points)
+        pointPolyData.SetVerts(self.__Vertices)
         return 1
     
-    def createPoints2D(self, density , sliceno, image_data, orientation ):
+    def CreatePoints2D(self, point_spacing , sliceno, image_data, orientation ):
         '''creates a 2D point cloud on the image data on the selected orientation
         
         input:
@@ -438,7 +495,7 @@ class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
         returns: 
             vtkPoints
         '''
-        vtkPointCloud = self.__points
+        vtkPointCloud = self.__Points
         image_spacing = list ( image_data.GetSpacing() ) 
         image_origin  = list ( image_data.GetOrigin() )
         image_dimensions = list ( image_data.GetDimensions() )
@@ -451,8 +508,8 @@ class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
         dim_z     = image_dimensions.pop(orientation)
            
         # the total number of points on X and Y axis
-        max_x = int(image_dimensions[0] * density[0] )
-        max_y = int(image_dimensions[1] * density[1] )
+        max_x = int(image_dimensions[0] / point_spacing[0] )
+        max_y = int(image_dimensions[1] / point_spacing[1] )
         
         # print ("max_x: {} {} {}".format(max_x, image_dimensions, density))
         # print ("max_y: {} {} {}".format(max_y, image_dimensions, density))
@@ -481,7 +538,7 @@ class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
         
         return vtkPointCloud  
     
-    def CreatePoints3D(self, density , sliceno, image_data, orientation ):
+    def CreatePoints3D(self, point_spacing , image_data, orientation ):
         '''creates a 2D point cloud on the image data on the selected orientation
         
         input:
@@ -492,15 +549,15 @@ class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
         returns: 
             vtkPoints
         '''
-        vtkPointCloud = self.__points
+        vtkPointCloud = self.__Points
         image_spacing = list ( image_data.GetSpacing() ) 
         image_origin  = list ( image_data.GetOrigin() )
         image_dimensions = list ( image_data.GetDimensions() )
           
         # the total number of points on X and Y axis
-        max_x = int(image_dimensions[0] * density[0] )
-        max_y = int(image_dimensions[1] * density[1] )
-        max_z = int(image_dimensions[2] * density[2] )
+        max_x = int(image_dimensions[0] / point_spacing[0] )
+        max_y = int(image_dimensions[1] / point_spacing[1] )
+        max_z = int(image_dimensions[2] / point_spacing[2] )
         
         # print ("max_x: {} {} {}".format(max_x, image_dimensions, density))
         # print ("max_y: {} {} {}".format(max_y, image_dimensions, density))
@@ -531,19 +588,24 @@ class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
         
         return 1
     def FillCells(self):
-        vertices = self.__vertices
-        for i in range(self.__points.GetNumberOfPoints()):
-            vertices.InsertNextCell(1)
-            vertices.InsertCellPoint(i)
+        vertices = self.__Vertices
+        number_of_cells = vertices.GetNumberOfCells()
+        for i in range(self.GetNumberOfPoints()):
+            if i >= number_of_cells:
+                vertices.InsertNextCell(1)
+                vertices.InsertCellPoint(i)
     
-    def CalculateDensity(self, overlap, mode=SPHERE):
+    def CalculatePointSpacing(self, overlap, mode=SPHERE):
         '''returns the ratio between the figure size (radius) and the distance between 2 figures centers in 3D'''
-        if isinstance (overlap, tuple):
+        print ("CalculateDensity", overlap)
+        
+        if isinstance (overlap, tuple) or isinstance(overlap, list):
             d = [self.distance_from_overlap(ovl, mode=mode) for ovl in overlap]
         elif isinstance(overlap, float):
             d = [self.distance_from_overlap(overlap, mode=mode)]
             d += [d[-1]]
             d += [d[-1]]
+        return d
         
             
     def overlap(self, radius, center_distance, mode=SPHERE):
@@ -552,15 +614,15 @@ class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
                 overlap = (2 * numpy.acos(center_distance/radius/2.) - \
                            (center_distance/radius) *  numpy.sqrt(1 - \
                            (center_distance/radius/2.)*(center_distance/radius/2.)) \
-                          ) / 3.1415 * 100
+                          ) / 3.1415 
             elif mode == 'square':
-                overlap = (1 - center_distance/radius ) * 100
+                overlap = (1 - center_distance/radius ) 
             elif mode == 'cube':
-                overlap = (1 - center_distance/radius ) * 100
+                overlap = (1 - center_distance/radius ) 
             elif mode == 'sphere':
                 overlap = (2. * radius - center_distance)**2  *\
                           (center_distance + 4 * radius) / \
-                          (16 * radius ** 3 ) * 100
+                          (16 * radius ** 3 ) 
             else:
                 raise ValueError('unsupported mode',mode)
         else:
@@ -569,9 +631,9 @@ class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
     
     def distance_from_overlap(self, req, interp=False, N=1000, mode='sphere'):
         '''hard inversion'''
-        x = [2.* i/N for i in range(N+1)]
-        y = [self.overlap(1,x[i], mode=mode) - req for i in range(N+1)]
-        
+        radius = self.GetSubVolumeRadiusInVoxel()
+        x = [2.* i/N * radius for i in range(N+1)]
+        y = [self.overlap(radius, x[i], mode=mode) - req for i in range(N+1)]
         # find the value closer to 0 for required overlap
         idx = (y.index(min (y, key=abs)))
         if interp:
@@ -580,11 +642,13 @@ class cilPointCloudToPolyData(VTKPythonAlgorithmBase):
             else:
                 m = (y[idx] -y[idx-1]) / (x[idx] -x[idx-1])
             q = y[idx] - m * x[idx]
-            x = -q / m
+            x0 = -q / m
         else:
-            x = x[idx]
-        return x
-
+            x0 = x[idx]
+        return x0
+#%%
+        
+    
 err = vtk.vtkFileOutputWindow()
 err.SetFileName("tracer2.log")
 vtk.vtkOutputWindow.SetInstance(err)
@@ -689,11 +753,7 @@ stencil.Update()
 
 
 
-rotate = (0,30.,0)
-transform = vtk.vtkTransform()
-transform.Translate(dimensions[0]/2*spacing[0], dimensions[1]/2*spacing[1],0)
-transform.RotateZ(30.)
-transform.Translate(-dimensions[0]/2*spacing[0], -dimensions[1]/2*spacing[1],0)
+
 
 points = createPoints(density, sliceno , v16.GetOutput(), orientation)
 
@@ -711,11 +771,34 @@ vertices = points2vertices(points)
 pointPolyData = vtk.vtkPolyData()
 pointPolyData.SetPoints(points)
 pointPolyData.SetVerts(vertices)
+
+pointCloud = cilRegularPointCloudToPolyData()
+pointCloud.SetMode(cilRegularPointCloudToPolyData.SPHERE)
+pointCloud.SetDimensionality(3)
+pointCloud.SetSlice(3)
+pointCloud.SetInputConnection(0, v16.GetOutputPort())
+pointCloud.SetOverlap(0,0.4)
+pointCloud.SetOverlap(1,0.2)
+pointCloud.SetOverlap(2,0.4)
+pointCloud.SetSubVolumeRadiusInVoxel(3.)
+pointCloud.Update()
+
+print ("pointCloud number of points", pointCloud.GetNumberOfPoints())
      
+
+rotate = (0,0.,0)
+transform = vtk.vtkTransform()
+transform.Translate(dimensions[0]/2*spacing[0], dimensions[1]/2*spacing[1],0)
+transform.RotateX(rotate[0])
+transform.RotateY(rotate[1])
+transform.RotateZ(rotate[2])
+transform.Translate(-dimensions[0]/2*spacing[0], -dimensions[1]/2*spacing[1],0)
+
 t_filter = vtk.vtkTransformFilter()
 t_filter.SetTransform(transform)
-t_filter.SetInputData(pointPolyData)
-t_filter.Update()
+#t_filter.SetInputData(pointPolyData)
+t_filter.SetInputConnection(pointCloud.GetOutputPort())
+#t_filter.Update()
 
 
 
