@@ -434,10 +434,10 @@ class cilRegularPointCloudToPolyData(VTKPythonAlgorithmBase):
     
     def SetSubVolumeRadiusInVoxel(self, value):
         '''Set the radius of the subvolume in voxel'''
-        if not isinstance(value, Number):
-            raise ValueError('SubVolumeRadius must be a number larger than 1. Got', value)
+        if not isinstance(value, Integral):
+            raise ValueError('SubVolumeRadius must be an integer larger than 1. Got', value)
         if not value > 1:
-            raise ValueError('SubVolumeRadius must be a number larger than 1. Got', value)
+            raise ValueError('SubVolumeRadius must be an integer larger than 1. Got', value)
         if self.__SubVolumeRadius != value:
             self.__SubVolumeRadius = value
             self.Modified()
@@ -565,7 +565,8 @@ class cilRegularPointCloudToPolyData(VTKPythonAlgorithmBase):
         # print ("Sliceno {} Z {}".format(sliceno, z))
         
         # skip the offset in voxels
-        offset = [1, 1, 1]
+        # radius = self.GetSubVolumeRadiusInVoxel()
+        offset = [0, 0, 0]
         n_x = offset[0]
          
         while n_x < max_x:
@@ -773,20 +774,20 @@ pointPolyData.SetPoints(points)
 pointPolyData.SetVerts(vertices)
 
 pointCloud = cilRegularPointCloudToPolyData()
-pointCloud.SetMode(cilRegularPointCloudToPolyData.SPHERE)
-pointCloud.SetDimensionality(3)
+pointCloud.SetMode(cilRegularPointCloudToPolyData.CUBE)
+pointCloud.SetDimensionality(2)
 pointCloud.SetSlice(3)
 pointCloud.SetInputConnection(0, v16.GetOutputPort())
-pointCloud.SetOverlap(0,0.4)
-pointCloud.SetOverlap(1,0.2)
+pointCloud.SetOverlap(0,0.3)
+pointCloud.SetOverlap(1,0.5)
 pointCloud.SetOverlap(2,0.4)
-pointCloud.SetSubVolumeRadiusInVoxel(3.)
+pointCloud.SetSubVolumeRadiusInVoxel(3)
 pointCloud.Update()
 
 print ("pointCloud number of points", pointCloud.GetNumberOfPoints())
      
 
-rotate = (0,0.,0)
+rotate = (0,0.,25)
 transform = vtk.vtkTransform()
 transform.Translate(dimensions[0]/2*spacing[0], dimensions[1]/2*spacing[1],0)
 transform.RotateX(rotate[0])
@@ -808,10 +809,26 @@ t_filter.SetInputConnection(pointCloud.GetOutputPort())
 # masked_polydata.SetMask(stencil.GetOutput())
 # masked_polydata.SetPolyDataInput(t_filter.GetOutput())
 
+print (stencil.GetOutput())
+# Erode the mask of SubVolumeRadius
+erode = vtk.vtkImageDilateErode3D()
+erode.SetInputConnection(0,stencil.GetOutputPort())
+erode.SetErodeValue(1)
+erode.SetDilateValue(0) #: shouldn't exist in the mask
+ks = [pointCloud.GetSubVolumeRadiusInVoxel(), pointCloud.GetSubVolumeRadiusInVoxel(), 0]
+if pointCloud.GetDimensionality() == 3:
+    ks[2]= pointCloud.GetSubVolumeRadiusInVoxel()
+
+print (ks)
+erode.SetKernelSize(ks[0],ks[1],1)
+erode.Update()
+print (erode.GetOutput())
+
 polydata_masker = cilMaskPolyData()
 polydata_masker.SetMaskValue(1)
 polydata_masker.SetInputConnection(0, t_filter.GetOutputPort())
-polydata_masker.SetInputConnection(1, stencil.GetOutputPort())
+polydata_masker.SetInputConnection(1, erode.GetOutputPort())
+# polydata_masker.SetInputConnection(1, stencil.GetOutputPort())
 polydata_masker.Update()
 
 mapper = vtk.vtkPolyDataMapper()
@@ -827,9 +844,46 @@ actor.GetProperty().SetColor(1, .2, .2)
 actor.VisibilityOn()
 
 
+### Sphere glyphs for pointcloud
+# subvolume
+# arrow
+subv_glyph = vtk.vtkGlyph3D()
+subv_glyph.SetScaleFactor(1.)
+# arrow_glyph.SetColorModeToColorByVector()
+spacing = erode.GetOutput().GetSpacing()
+radius = pointCloud.GetSubVolumeRadiusInVoxel()
+
+sphere_source = vtk.vtkSphereSource()
+sphere_source.SetRadius(radius * spacing[0])
+sphere_source.SetThetaResolution(12)
+sphere_source.SetPhiResolution(12)
+
+print ("spacing",spacing)
+print ("radius",radius)
+
+cube_source = vtk.vtkCubeSource()
+cube_source.SetXLength(spacing[0]*radius)
+cube_source.SetYLength(spacing[1]*radius)
+cube_source.SetZLength(spacing[2]*radius)
+
+sphere_mapper = vtk.vtkPolyDataMapper()
+sphere_mapper.SetInputConnection( subv_glyph.GetOutputPort() )
+subv_glyph.SetInputConnection(polydata_masker.GetOutputPort())
+# subv_glyph.SetSourceConnection( sphere_source.GetOutputPort() )
+subv_glyph.SetSourceConnection( cube_source.GetOutputPort() )
+
+# Usual actor
+sphere_actor = vtk.vtkActor()
+sphere_actor.SetMapper(sphere_mapper)
+sphere_actor.GetProperty().SetColor(1, 0, 0)
+sphere_actor.GetProperty().SetOpacity(0.2)
+
+
 if True:
     v = CILViewer2D()
     # v.setInput3DData(v16.GetOutput())
     v.setInput3DData(stencil.GetOutput())
+    # v.setInput3DData(erode.GetOutput())
     v.ren.AddActor(actor)
+    v.ren.AddActor(sphere_actor)
     v.startRenderLoop()
