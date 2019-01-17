@@ -6,10 +6,12 @@ Created on Wed Jan 16 14:21:00 2019
 
 @author: Edoardo Pasca
 """
-import numpy
+import os
 from numbers import Integral, Number
+import numpy
 import vtk
 from vtk.util.vtkAlgorithm import VTKPythonAlgorithmBase
+
 
 class cilRegularPointCloudToPolyData(VTKPythonAlgorithmBase):
     '''vtkAlgorithm to create a regular point cloud grid for Digital Volume Correlation
@@ -153,6 +155,7 @@ class cilRegularPointCloudToPolyData(VTKPythonAlgorithmBase):
         overlap = self.GetOverlap()
         # print ("overlap", overlap)
         point_spacing = self.CalculatePointSpacing(overlap, mode=self.GetMode())
+        # print ("point_spacing", point_spacing)
 
         if dimensionality == 3:
             self.CreatePoints3D(point_spacing, image_data)
@@ -242,7 +245,7 @@ class cilRegularPointCloudToPolyData(VTKPythonAlgorithmBase):
         max_y = int(image_dimensions[1] / point_spacing[1] )
         max_z = int(image_dimensions[2] / point_spacing[2] )
 
-        # print ("max_x: {} {} {}".format(max_x, image_dimensions, density))
+        # print ("max_x: {} {} {}".format((max_x, max_y, max_z), image_dimensions, point_spacing))
         # print ("max_y: {} {} {}".format(max_y, image_dimensions, density))
 
         # print ("Sliceno {} Z {}".format(sliceno, z))
@@ -390,7 +393,7 @@ class cilMaskPolyData(VTKPythonAlgorithmBase):
                                                       int(ic[1]),
                                                       int(ic[2]), 0)
 
-                if int(mm) == self.GetMaskValue():
+                if int(mm) == int(self.GetMaskValue()):
                     print ("value of point {} {}".format(mm, ic))
                     out_points.InsertNextPoint(*pp)
                     self.point_in_mask += 1
@@ -495,6 +498,7 @@ class cilNumpyMETAImageWriter():
     '''
     __FileName = None
     __Array = None
+    __Spacing = (1.,1.,1.)
     def __init__(self):
         pass
 
@@ -513,8 +517,15 @@ class cilNumpyMETAImageWriter():
         self.__FileName = os.path.abspath(fname)
     def GetFileName(self):
         return self.__FileName
+    def SetSpacing(self, value):
+        if not (isinstance(value, list) or isinstance(value, tuple)):
+            raise ValueError('Spacing should be a list or a tuple. Got', type(value))
+        if len(value) != len(self.__Array.shape):
+            self.__Spacing = value
+            self.Modified()
+        
 
-def WriteNumpyAsMETAImage(array, filename):
+def WriteNumpyAsMETAImage(array, filename, spacing=(1.,1.,1.)):
     '''Writes a NumPy array and a METAImage text header so that the npy file can be used as data file'''
     # save the data as numpy
     datafname = os.path.abspath(filename) + '.npy'
@@ -556,7 +567,7 @@ def WriteNumpyAsMETAImage(array, filename):
     header += 'NDims = {0}\n'.format(len(array.shape))
     header += 'DimSize = {} {} {}\n'.format(array.shape[0], array.shape[1], array.shape[2])
     header += 'ElementType = {}\n'.format(ar_type)
-    header += 'ElementSpacing = 1.0 1.0 1.0\n'
+    header += 'ElementSpacing = {} {} {}\n'.format(spacing[0], spacing[1], spacing[2])
     # MSB (aka big-endian)
     descr = npyhdr['description']
     MSB = 'True' if descr['descr'][0] == '>' else 'False'
