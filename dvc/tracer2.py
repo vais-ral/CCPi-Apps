@@ -21,7 +21,7 @@ import numpy
 from numbers import Integral, Number
 
 from utils import cilRegularPointCloudToPolyData
-from utils import cilMaskPolyData
+from utils import cilMaskPolyData , cilClipPolyDataBetweenPlanes
 from utils import cilNumpyMETAImageWriter
 
 
@@ -239,10 +239,18 @@ polydata_masker.SetInputConnection(0, t_filter.GetOutputPort())
 polydata_masker.SetInputConnection(1, erode.GetOutputPort())
 polydata_masker.Update()
 
+# clip between planes?
+bpc = cilClipPolyDataBetweenPlanes()
+bpc.SetInputConnection(polydata_masker.GetOutputPort())
+bpc.SetPlaneOriginAbove((0,0,3))
+bpc.SetPlaneOriginBelow((0,0,1))
+bpc.SetPlaneNormalAbove((0,0,1))
+bpc.SetPlaneNormalBelow((0,0,-1))
 
 # create a mapper/actor for the point cloud
 mapper = vtk.vtkPolyDataMapper()
-mapper.SetInputConnection(polydata_masker.GetOutputPort())
+mapper.SetInputConnection(bpc.GetOutputPort())
+# mapper.SetInputConnection(polydata_masker.GetOutputPort())
 # mapper.SetInputConnection(pointCloud.GetOutputPort())
 
 
@@ -278,7 +286,8 @@ cube_source.SetZLength(spacing[2]*radius)
 # mapper for the glyphs
 sphere_mapper = vtk.vtkPolyDataMapper()
 sphere_mapper.SetInputConnection( subv_glyph.GetOutputPort() )
-subv_glyph.SetInputConnection( polydata_masker.GetOutputPort() )
+# subv_glyph.SetInputConnection( polydata_masker.GetOutputPort() )
+subv_glyph.SetInputConnection( bpc.GetOutputPort() )
 
 # subv_glyph.SetSourceConnection( sphere_source.GetOutputPort() )
 subv_glyph.SetSourceConnection( cube_source.GetOutputPort() )
@@ -289,9 +298,65 @@ sphere_actor.SetMapper(sphere_mapper)
 sphere_actor.GetProperty().SetColor(1, 0, 0)
 sphere_actor.GetProperty().SetOpacity(0.2)
 
+def UpdateClippingPlanes(interactor, event):
+    # print("caught updateClippingPlane!", event)
+    normal = [0, 0, 0]
+    origin = [0, 0, 0]
+    norm = 1
+    orientation = v.GetSliceOrientation()
+    from ccpi.viewer.CILViewer2D import SLICE_ORIENTATION_XY
+    from ccpi.viewer.CILViewer2D import SLICE_ORIENTATION_XZ
+    from ccpi.viewer.CILViewer2D import SLICE_ORIENTATION_YZ
+    if orientation == SLICE_ORIENTATION_XY:
+        norm = 1
+    elif orientation == SLICE_ORIENTATION_XZ:
+        norm = -1
+    elif orientation == SLICE_ORIENTATION_YZ:
+        norm = 1
+    beta = 0
+    if event == "MouseWheelForwardEvent":
+        # this is pretty absurd but it seems the
+        # plane cuts too much in Forward...
+        beta = +2
+    
+    spac = v.img3D.GetSpacing()
+    orig = v.img3D.GetOrigin()
+    slice_thickness = spac[orientation]
+    
+    normal[orientation] = norm
+    origin [orientation] = (v.GetActiveSlice() + beta ) * \
+       slice_thickness - orig[orientation]
+        
+    print("slice {} beta {} orig {} spac {} normal {}".format(v.GetActiveSlice(), beta,
+          orig, spac , normal))
+    print("origin", origin, orientation)
+    print("<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>")
+    bpc.SetPlaneOriginAbove(origin)
+    bpc.SetPlaneNormalAbove(origin)
+    # self.visPlane[0].SetOrigin(origin[0], origin[1], origin[2])
+    # self.visPlane[0].SetNormal(normal[0], normal[1], normal[2])
+    
+    # update the  plane below
+    beta += 1
+    slice_below = v.GetActiveSlice() -1 + beta
+    if slice_below < 0:
+        slice_below = 0
+    origin [orientation] = ( slice_below ) * \
+       slice_thickness - orig[orientation]
+    
+    bpc.SetPlaneOriginBelow(origin)
+    bpc.SetPlaneNormalBelow((-normal[0], -normal[1], -normal[2]))
+    #self.visPlane[1].SetOrigin(origin[0], origin[1], origin[2])
+    #self.visPlane[1].SetNormal(-normal[0], -normal[1], -normal[2])
+
 
 if True:
+    
+    
     v = CILViewer2D()
+    priority = 0.3
+    v.style.AddObserver("MouseWheelForwardEvent" ,  UpdateClippingPlanes , priority)
+    v.style.AddObserver("MouseWheelBackwardEvent" , UpdateClippingPlanes, priority)
     # v.setInput3DData(v16.GetOutput())
     # v.setInput3DData(stencilr.GetOutput())
     v.setInput3DData(erode.GetOutput())

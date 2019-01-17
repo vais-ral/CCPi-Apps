@@ -451,18 +451,18 @@ class cilClipPolyDataBetweenPlanes(VTKPythonAlgorithmBase):
             
 
     def SetPlaneOriginAbove(self, value):
-        if not isinstance(value, Number):
-            raise ValueError('PlaneOrigin must be a number. Got' , value)
+        if not (isinstance(value, list) or isinstance(value, tuple)):
+            raise ValueError('Spacing should be a list or a tuple. Got', type(value))
 
-        if value != self.__PlaneOrigin:
+        if value != self.__PlaneOriginAbove:
             self.__PlaneOriginAbove = value
             self.Modified()
 
     def GetPlaneOriginAbove(self):
         return self.__PlaneOriginAbove
     def SetPlaneNormalAbove(self, value):
-        if not isinstance(value, Number):
-            raise ValueError('PlaneNormal must be a number. Got' , value)
+        if not (isinstance(value, list) or isinstance(value, tuple)):
+            raise ValueError('Spacing should be a list or a tuple. Got', type(value))
 
         if value != self.__PlaneNormalAbove:
             self.__PlaneNormalAbove = value
@@ -470,17 +470,17 @@ class cilClipPolyDataBetweenPlanes(VTKPythonAlgorithmBase):
     def GetPlaneNormalAbove(self):
         return self.__PlaneNormalAbove
     def SetPlaneOriginBelow(self, value):
-        if not isinstance(value, Number):
-            raise ValueError('PlaneOrigin must be a number. Got' , value)
+        if not (isinstance(value, list) or isinstance(value, tuple)):
+            raise ValueError('Spacing should be a list or a tuple. Got', type(value))
 
-        if value != self.__PlaneOrigin:
+        if value != self.__PlaneOriginBelow:
             self.__PlaneOriginBelow = value
             self.Modified()
     def GetPlaneOriginBelow(self):
         return self.__PlaneOriginBelow
     def SetPlaneNormalBelow(self, value):
-        if not isinstance(value, Number):
-            raise ValueError('PlaneNormal must be a number. Got' , value)
+        if not (isinstance(value, list) or isinstance(value, tuple)):
+            raise ValueError('Spacing should be a list or a tuple. Got', type(value))
 
         if value != self.__PlaneNormalBelow:
             self.__PlaneNormalBelow = value
