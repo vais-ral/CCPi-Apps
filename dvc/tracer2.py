@@ -22,6 +22,7 @@ from numbers import Integral, Number
 
 from utils import cilRegularPointCloudToPolyData
 from utils import cilMaskPolyData
+from utils import cilNumpyMETAImageWriter
 
 
 
@@ -50,6 +51,7 @@ origin = v16.GetOutput().GetOrigin()
 spacing = v16.GetOutput().GetSpacing()
 dimensions = v16.GetOutput().GetDimensions()
 sliceno = 3
+orientation = 2
 
 
 
@@ -138,8 +140,7 @@ mat.SetConstantC(2)
 mat.Update()
 print (sumimage.GetScalarComponentAsDouble(0,0,0,0))
 print (mat.GetOutput().GetScalarComponentAsDouble(0,0,0,0))
-
-
+    
 lasso = vtk.vtkLassoStencilSource()
 lasso.SetShapeToPolygon()
 # pass the slice at which the lasso has to process
@@ -155,7 +156,29 @@ stencil.SetBackgroundInputData(mask0.GetOutput())
 stencil.SetStencilConnection(lasso.GetOutputPort())
 stencil.Update()
 
-
+if True:
+    # erode_np = Converter.vtk2numpy(stencil.GetOutput(), [2,1,0])
+    # copy the slice from sliceno for 20 slices
+    # print (erode_np[:,:,sliceno].mean())
+    dims = stencil.GetOutput().GetDimensions()
+    for x in range(dims[0]):
+        for y in range(dims[1]):
+            for z in range(20):
+                v = stencil.GetOutput().GetScalarComponentAsFloat(x,y,sliceno,0)
+                stencil.GetOutput().SetScalarComponentFromFloat(x,y,z+sliceno+1,0,v)
+'''    fname = 'tmp'
+    npMetaW = cilNumpyMETAImageWriter()
+    npMetaW.SetFileName(fname)
+    npMetaW.SetInputData(erode_np)
+    npMetaW.SetSpacing(v16.GetOutput().GetSpacing())
+    npMetaW.Write()
+    
+    stencilr = vtk.vtkMetaImageReader()
+    stencilr.SetFileName(fname+'.mhd')
+    stencilr.Update()
+    
+    print ('v1 origin' , v16.GetOutput().GetOrigin())
+    '''
 #%%
 
 
@@ -163,12 +186,12 @@ stencil.Update()
 
 pointCloud = cilRegularPointCloudToPolyData()
 pointCloud.SetMode(cilRegularPointCloudToPolyData.CUBE)
-pointCloud.SetDimensionality(2)
+pointCloud.SetDimensionality(3)
 pointCloud.SetSlice(3)
 pointCloud.SetInputConnection(0, v16.GetOutputPort())
 pointCloud.SetOverlap(0,0.3)
-pointCloud.SetOverlap(1,0.5)
-pointCloud.SetOverlap(2,0.4)
+pointCloud.SetOverlap(1,0.4)
+pointCloud.SetOverlap(2,0.1)
 pointCloud.SetSubVolumeRadiusInVoxel(3)
 pointCloud.Update()
 
@@ -198,7 +221,7 @@ t_filter.SetInputConnection(pointCloud.GetOutputPort())
 erode = vtk.vtkImageDilateErode3D()
 erode.SetInputConnection(0,stencil.GetOutputPort())
 erode.SetErodeValue(1)
-erode.SetDilateValue(0) #: shouldn't exist in the mask
+erode.SetDilateValue(0) 
 ks = [pointCloud.GetSubVolumeRadiusInVoxel(), pointCloud.GetSubVolumeRadiusInVoxel(), 1]
 if pointCloud.GetDimensionality() == 3:
     ks[2]= pointCloud.GetSubVolumeRadiusInVoxel()
@@ -220,6 +243,8 @@ polydata_masker.Update()
 # create a mapper/actor for the point cloud
 mapper = vtk.vtkPolyDataMapper()
 mapper.SetInputConnection(polydata_masker.GetOutputPort())
+# mapper.SetInputConnection(pointCloud.GetOutputPort())
+
 
 # create an actor for the points as point
 actor = vtk.vtkLODActor()
@@ -268,8 +293,8 @@ sphere_actor.GetProperty().SetOpacity(0.2)
 if True:
     v = CILViewer2D()
     # v.setInput3DData(v16.GetOutput())
-    v.setInput3DData(stencil.GetOutput())
-    # v.setInput3DData(erode.GetOutput())
+    # v.setInput3DData(stencilr.GetOutput())
+    v.setInput3DData(erode.GetOutput())
     v.ren.AddActor(actor)
     v.ren.AddActor(sphere_actor)
     v.startRenderLoop()
