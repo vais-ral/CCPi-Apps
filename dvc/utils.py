@@ -429,9 +429,11 @@ class cilMaskPolyData(VTKPythonAlgorithmBase):
 class cilClipPolyDataBetweenPlanes(VTKPythonAlgorithmBase):
     def __init__(self):
         VTKPythonAlgorithmBase.__init__(self, nInputPorts=1, nOutputPorts=1)
-        self.__PlaneOrigin    = 0
-        self.__PlaneNormal    = 1
-        self.__PlaneDistance  = 1
+        self.__PlaneOriginAbove    = 0
+        self.__PlaneNormalAbove    = 1
+        self.__PlaneOriginBelow    = 0
+        self.__PlaneNormalBelow    = 1
+        
         self.planesource = [ vtk.vtkPlaneSource(), vtk.vtkPlaneSource() ]
         self.visPlane = [ vtk.vtkPlane() , vtk.vtkPlane() ]
         self.planeClipper =  [ vtk.vtkClipPolyData() , vtk.vtkClipPolyData()]
@@ -440,28 +442,51 @@ class cilClipPolyDataBetweenPlanes(VTKPythonAlgorithmBase):
         self.planesource[1].SetCenter(self.visPlane[1].GetOrigin())
         self.planesource[0].SetNormal(self.visPlane[0].GetNormal())
         self.planesource[1].SetNormal(self.visPlane[1].GetNormal())
+        
+        self.planeClipper[0].SetClipFunction(self.visPlane[0])
+        self.planeClipper[1].SetClipFunction(self.visPlane[1])
+        
+        self.planeClipper[0].InsideOutOn()
+        self.planeClipper[1].InsideOutOn()
+            
 
-    def SetPlaneOrigin(self, value):
+    def SetPlaneOriginAbove(self, value):
         if not isinstance(value, Number):
             raise ValueError('PlaneOrigin must be a number. Got' , value)
 
         if value != self.__PlaneOrigin:
-            self.__PlaneOrigin = value
+            self.__PlaneOriginAbove = value
             self.Modified()
 
-    def GetPlaneOrigin(self):
-        return self.__PlaneOrigin
-
-    def SetPlaneNormal(self, value):
+    def GetPlaneOriginAbove(self):
+        return self.__PlaneOriginAbove
+    def SetPlaneNormalAbove(self, value):
         if not isinstance(value, Number):
             raise ValueError('PlaneNormal must be a number. Got' , value)
 
-        if value != self.__PlaneNormal:
-            self.__PlaneNormal = value
+        if value != self.__PlaneNormalAbove:
+            self.__PlaneNormalAbove = value
             self.Modified()
+    def GetPlaneNormalAbove(self):
+        return self.__PlaneNormalAbove
+    def SetPlaneOriginBelow(self, value):
+        if not isinstance(value, Number):
+            raise ValueError('PlaneOrigin must be a number. Got' , value)
 
-    def GetPlaneNormal(self):
-        return self.__PlaneNormal
+        if value != self.__PlaneOrigin:
+            self.__PlaneOriginBelow = value
+            self.Modified()
+    def GetPlaneOriginBelow(self):
+        return self.__PlaneOriginBelow
+    def SetPlaneNormalBelow(self, value):
+        if not isinstance(value, Number):
+            raise ValueError('PlaneNormal must be a number. Got' , value)
+
+        if value != self.__PlaneNormalBelow:
+            self.__PlaneNormalBelow = value
+            self.Modified()
+    def GetPlaneNormalBelow(self):
+        return self.__PlaneNormalBelow
 
     def SetPlaneDistance(self, value):
         if not isinstance(value, Number):
@@ -487,7 +512,21 @@ class cilClipPolyDataBetweenPlanes(VTKPythonAlgorithmBase):
         return 1
 
     def RequestData(self, request, inInfo, outInfo):
-
+        self.planeClipper[0].SetInputData(vtk.vtkPolyData.GetData(inInfo[0]))
+        self.planeClipper[1].SetInputConnection(self.planeClipper[0].GetOutputPort())
+        
+        origin = self.GetPlaneOriginAbove()
+        normal = self.GetPlaneNormalAbove()
+        self.visPlane[0].SetOrigin(origin[0], origin[1], origin[2])
+        self.visPlane[0].SetNormal(normal[0], normal[1], normal[2])
+        
+        origin = self.GetPlaneOriginBelow()
+        normal = self.GetPlaneNormalBelow()
+        self.visPlane[1].SetOrigin(origin[0], origin[1], origin[2])
+        self.visPlane[1].SetNormal(normal[0], normal[1], normal[2])
+        
+        pointPolyData = vtk.vtkPolyData.GetData(outInfo)
+        pointPolyData.DeepCopy(self.planeClipper[1].GetOutput())
         return 1
 
 
@@ -512,7 +551,7 @@ class cilNumpyMETAImageWriter():
         if self.__FileName is None:
             raise ValueError('FileName is None')
 
-        WriteNumpyAsMETAImage(self.__Array, self.__FileName)
+        WriteNumpyAsMETAImage(self.__Array, self.__FileName, self.__Spacing)
     def SetFileName(self, fname):
         self.__FileName = os.path.abspath(fname)
     def GetFileName(self):
