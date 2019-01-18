@@ -190,8 +190,8 @@ pointCloud.SetDimensionality(3)
 pointCloud.SetSlice(3)
 pointCloud.SetInputConnection(0, v16.GetOutputPort())
 pointCloud.SetOverlap(0,0.3)
-pointCloud.SetOverlap(1,0.4)
-pointCloud.SetOverlap(2,0.1)
+pointCloud.SetOverlap(1,0.2)
+pointCloud.SetOverlap(2,0.4)
 pointCloud.SetSubVolumeRadiusInVoxel(3)
 pointCloud.Update()
 
@@ -200,7 +200,7 @@ print ("pointCloud number of points", pointCloud.GetNumberOfPoints())
 
 ## Create a Transform to modify the PointCloud
 # Translation and Rotation
-rotate = (0,0.,25)
+rotate = (0.,0.,0.)
 transform = vtk.vtkTransform()
 # rotate around the center of the image data
 transform.Translate(dimensions[0]/2*spacing[0], dimensions[1]/2*spacing[1],0)
@@ -238,21 +238,24 @@ polydata_masker.SetMaskValue(1)
 polydata_masker.SetInputConnection(0, t_filter.GetOutputPort())
 polydata_masker.SetInputConnection(1, erode.GetOutputPort())
 polydata_masker.Update()
+#print ("polydata_masker type", type(polydata_masker.GetOutput()))
 
-# clip between planes?
-bpc = cilClipPolyDataBetweenPlanes()
-bpc.SetInputConnection(polydata_masker.GetOutputPort())
-bpc.SetPlaneOriginAbove((0,0,3))
-bpc.SetPlaneOriginBelow((0,0,1))
-bpc.SetPlaneNormalAbove((0,0,1))
-bpc.SetPlaneNormalBelow((0,0,-1))
 
 # create a mapper/actor for the point cloud
+
+bpcpoints = cilClipPolyDataBetweenPlanes()
+bpcpoints.SetInputConnection(polydata_masker.GetOutputPort())
+bpcpoints.SetPlaneOriginAbove((0,0,3))
+bpcpoints.SetPlaneOriginBelow((0,0,1))
+bpcpoints.SetPlaneNormalAbove((0,0,1))
+bpcpoints.SetPlaneNormalBelow((0,0,-1))
+bpcpoints.Update()
+
 mapper = vtk.vtkPolyDataMapper()
-mapper.SetInputConnection(bpc.GetOutputPort())
+# mapper.SetInputConnection(bpc.GetOutputPort())
 # mapper.SetInputConnection(polydata_masker.GetOutputPort())
 # mapper.SetInputConnection(pointCloud.GetOutputPort())
-
+mapper.SetInputConnection(bpcpoints.GetOutputPort())
 
 # create an actor for the points as point
 actor = vtk.vtkLODActor()
@@ -283,23 +286,37 @@ cube_source.SetXLength(spacing[0]*radius)
 cube_source.SetYLength(spacing[1]*radius)
 cube_source.SetZLength(spacing[2]*radius)
 
+
+# clip between planes
+bpcvolume = cilClipPolyDataBetweenPlanes()
+bpcvolume.SetInputConnection(subv_glyph.GetOutputPort())
+bpcvolume.SetPlaneOriginAbove((0,0,3))
+bpcvolume.SetPlaneOriginBelow((0,0,1))
+bpcvolume.SetPlaneNormalAbove((0,0,1))
+bpcvolume.SetPlaneNormalBelow((0,0,-1))
+bpcvolume.Update()
+
+
 # mapper for the glyphs
 sphere_mapper = vtk.vtkPolyDataMapper()
-sphere_mapper.SetInputConnection( subv_glyph.GetOutputPort() )
-# subv_glyph.SetInputConnection( polydata_masker.GetOutputPort() )
-subv_glyph.SetInputConnection( bpc.GetOutputPort() )
+# sphere_mapper.SetInputConnection( subv_glyph.GetOutputPort() )
+sphere_mapper.SetInputConnection( bpcvolume.GetOutputPort() )
+
+subv_glyph.SetInputConnection( polydata_masker.GetOutputPort() )
 
 # subv_glyph.SetSourceConnection( sphere_source.GetOutputPort() )
 subv_glyph.SetSourceConnection( cube_source.GetOutputPort() )
+
+subv_glyph.SetVectorModeToUseNormal()
 
 # actor for the glyphs
 sphere_actor = vtk.vtkActor()
 sphere_actor.SetMapper(sphere_mapper)
 sphere_actor.GetProperty().SetColor(1, 0, 0)
 sphere_actor.GetProperty().SetOpacity(0.2)
+sphere_actor.GetProperty().SetRepresentationToWireframe()
 
 def UpdateClippingPlanes(interactor, event):
-    # print("caught updateClippingPlane!", event)
     normal = [0, 0, 0]
     origin = [0, 0, 0]
     norm = 1
@@ -317,38 +334,46 @@ def UpdateClippingPlanes(interactor, event):
     if event == "MouseWheelForwardEvent":
         # this is pretty absurd but it seems the
         # plane cuts too much in Forward...
-        beta = +2
+        beta =+ 2
     
     spac = v.img3D.GetSpacing()
     orig = v.img3D.GetOrigin()
     slice_thickness = spac[orientation]
     
     normal[orientation] = norm
-    origin [orientation] = (v.GetActiveSlice() + beta ) * \
-       slice_thickness - orig[orientation]
+    origin [orientation] = (v.style.GetActiveSlice() + beta ) * slice_thickness - orig[orientation]
+    # print("event {} origin above {} beta {}".format(event, origin, beta))        
         
-    print("slice {} beta {} orig {} spac {} normal {}".format(v.GetActiveSlice(), beta,
-          orig, spac , normal))
-    print("origin", origin, orientation)
-    print("<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>")
-    bpc.SetPlaneOriginAbove(origin)
-    bpc.SetPlaneNormalAbove(origin)
-    # self.visPlane[0].SetOrigin(origin[0], origin[1], origin[2])
-    # self.visPlane[0].SetNormal(normal[0], normal[1], normal[2])
+    # print("slice {} beta {} orig {} spac {} normal {}".format(v.GetActiveSlice(), beta,
+    #      orig, spac , normal))
+    # print("origin", origin, orientation)
+    # print("<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>")
+    
+    bpcpoints.SetPlaneOriginAbove(origin)
+    bpcpoints.SetPlaneNormalAbove(normal)
+    
+    bpcvolume.SetPlaneOriginAbove(origin)
+    bpcvolume.SetPlaneNormalAbove(normal)
+    
     
     # update the  plane below
-    beta += 1
-    slice_below = v.GetActiveSlice() -1 + beta
+    #beta += 1
+    slice_below = v.style.GetActiveSlice() -1 + beta
     if slice_below < 0:
         slice_below = 0
-    origin [orientation] = ( slice_below ) * \
-       slice_thickness - orig[orientation]
+        
+    origin_below = [i for i in origin]
+    origin_below[orientation] = ( slice_below ) * slice_thickness - orig[orientation]
+    print("event {} origin below {} beta {}".format(event, origin_below, beta))        
     
-    bpc.SetPlaneOriginBelow(origin)
-    bpc.SetPlaneNormalBelow((-normal[0], -normal[1], -normal[2]))
-    #self.visPlane[1].SetOrigin(origin[0], origin[1], origin[2])
-    #self.visPlane[1].SetNormal(-normal[0], -normal[1], -normal[2])
-
+    bpcpoints.SetPlaneOriginBelow(origin_below)
+    bpcpoints.SetPlaneNormalBelow((-normal[0], -normal[1], -normal[2]))
+    bpcvolume.SetPlaneOriginBelow(origin_below)
+    bpcvolume.SetPlaneNormalBelow((-normal[0], -normal[1], -normal[2]))
+    
+    bpcpoints.Update()
+    bpcvolume.Update()
+    print (">>>>>>>>>>>>>>>>>>>>>")
 
 if True:
     
@@ -358,8 +383,12 @@ if True:
     v.style.AddObserver("MouseWheelForwardEvent" ,  UpdateClippingPlanes , priority)
     v.style.AddObserver("MouseWheelBackwardEvent" , UpdateClippingPlanes, priority)
     # v.setInput3DData(v16.GetOutput())
-    # v.setInput3DData(stencilr.GetOutput())
-    v.setInput3DData(erode.GetOutput())
+    v.setInput3DData(stencil.GetOutput())
+    # v.setInput3DData(erode.GetOutput())
+    
+    v.style.SetActiveSlice(3)
     v.ren.AddActor(actor)
     v.ren.AddActor(sphere_actor)
+    # v.showActor(actor)
+    # v.showActor(sphere_actor)
     v.startRenderLoop()
